@@ -15,6 +15,7 @@ live_design!{
         demos = {
             <SlidesView> {
                 width: Fill, height: Fill,
+                anim_speed: 0.5
 
                 <SlideChapter> {
                     title = {text: "Hey!"},
