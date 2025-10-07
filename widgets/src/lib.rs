@@ -43,6 +43,7 @@ pub mod window_menu;
 pub mod html;
 pub mod markdown;
 pub mod text_flow;
+pub mod text_flow_2;
 pub mod multi_image;
 pub mod modal;
 pub mod tooltip;
@@ -113,6 +114,7 @@ pub use crate::{
     slider::*,
     root::*,
     text_flow::*,
+    text_flow_2::*,
     markdown::*,
     html::*,
     check_box::*,
@@ -239,6 +241,7 @@ pub fn live_design(cx: &mut Cx) {
     crate::stack_navigation::live_design(cx);
     crate::expandable_panel::live_design(cx);
     crate::text_flow::live_design(cx);
+    crate::text_flow_2::live_design(cx);
     crate::markdown::live_design(cx);
     crate::html::live_design(cx);
     crate::root::live_design(cx);

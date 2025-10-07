@@ -217,6 +217,14 @@ impl DrawText {
         )
     }
 
+    pub fn draw_walk_resumable(
+        &mut self,
+        cx: &mut Cx2d,
+        text_str: &str,
+    ) {
+        self.draw_walk_resumable_with(cx, text_str, |_, _, _| {})
+    }
+
     pub fn draw_walk_resumable_with(
         &mut self,
         cx: &mut Cx2d,
@@ -228,24 +236,6 @@ impl DrawText {
         let origin_in_lpxs = Point::new(turtle_rect.pos.x as f32, turtle_pos.y as f32);
         let first_row_indent_in_lpxs = turtle_pos.x as f32 - origin_in_lpxs.x;
         let row_height = cx.turtle().next_row_offset();
-        
-        // lets draw a debug rect
-        /*
-        if text_str.starts_with("markdownedited"){
-            let mut area = Area::Empty;
-            cx.add_aligned_rect_area(
-                &mut area,
-                makepad_platform::rect(
-                    origin_in_lpxs.x as f64,
-                    origin_in_lpxs.y as f64,
-                    100.0 as f64,
-                    row_height as f64,
-                ),
-            );
-            cx.cx
-            .debug
-            .area(area, makepad_platform::vec4(1.0, 0.0, 0.0, 1.0));
-        }*/
         
         let max_width_in_lpxs = if !turtle_rect.size.x.is_nan() {
             Some(turtle_rect.size.x as f32)
@@ -535,7 +525,7 @@ impl DrawText {
     }
 }
 
-#[derive(Debug, Clone, Live, LiveHook, LiveRegister)]
+#[derive(Debug, Clone, Copy, Live, LiveHook, LiveRegister)]
 #[live_ignore]
 pub struct TextStyle {
     #[live]
@@ -546,7 +536,7 @@ pub struct TextStyle {
     pub line_spacing: f32,
 }
 
-#[derive(Debug, Clone, Live, LiveRegister, PartialEq)]
+#[derive(Debug, Clone, Copy, Live, LiveRegister, PartialEq)]
 pub struct FontFamily {
     #[rust]
     id: LiveId,
