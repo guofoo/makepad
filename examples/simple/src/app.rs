@@ -55,7 +55,9 @@ impl Widget for MyTextFlow {
         walk: Walk,
     ) -> DrawStep {
         self.text_flow.begin(cx, walk);
-        self.text_flow.draw_text(cx, "I don't like 'em putting chemicals in the water that turn the freaking ");
+        self.text_flow.push_style(Style::Underline);
+        self.text_flow.draw_text(cx, "I don't like 'em putting chemicals ");
+        self.text_flow.draw_text(cx, "in the water that turn the freaking ");
         self.text_flow.push_style(Style::Bold);
         self.text_flow.draw_text(cx, "frogs");
         self.text_flow.pop_style();

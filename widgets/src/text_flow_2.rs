@@ -9,8 +9,25 @@ live_design! {
     link widgets;
     
     use link::theme::*;
+    use makepad_draw::shader::std::*;
+
+    pub DrawUnderline = {{DrawUnderline}} {}
 
     pub TextFlow2 = {{TextFlow2}} {
+        draw_underline: {
+            draw_depth: 0.0,
+
+            fn pixel(self) -> vec4 {
+                let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                sdf.hline(
+                    self.rect_size.y - 1.0,
+                    1.0
+                );
+                sdf.fill(self.color);
+                return sdf.result;
+            }
+        }
+
         default_color: (THEME_COLOR_TEXT),
         text_styles: {
             normal: <THEME_FONT_REGULAR> {},
@@ -23,8 +40,10 @@ live_design! {
 
 #[derive(Live, LiveHook, Widget)]
 pub struct TextFlow2 {
-    #[redraw]
-    area: Area,
+    #[live]
+    draw_text: DrawText,
+    #[live]
+    draw_underline: DrawUnderline,
 
     #[layout]
     layout: Layout,
@@ -33,9 +52,10 @@ pub struct TextFlow2 {
     default_color: Vec4,
     #[live]
     text_styles: TextStyles,
-    #[live]
-    draw_text: DrawText,
 
+    #[redraw]
+    #[rust]
+    area: Area,
     #[rust]
     styles: StyleStack,
 }
@@ -46,7 +66,7 @@ impl TextFlow2 {
     }
 
     pub fn end(&mut self, cx: &mut Cx2d) {
-        cx.end_turtle();
+        cx.end_turtle_with_area(&mut self.area);
     }
 
     pub fn push_style(&mut self, style: Style) {
@@ -58,8 +78,8 @@ impl TextFlow2 {
     }
 
     pub fn draw_text(&mut self, cx: &mut Cx2d, text: &str) {
-        let style = self.styles.flatten();
-        self.draw_text.color = style.color.unwrap_or(self.default_color);
+        let style = self.styles.flatten(self.default_color);
+        self.draw_text.color = style.color;
         self.draw_text.text_style = match style {
             FlattenedStyle {
                 bold: false,
@@ -82,7 +102,12 @@ impl TextFlow2 {
                 ..
             } => self.text_styles.bold_italic,
         };
-        self.draw_text.draw_walk_resumable(cx, text);
+        self.draw_text.draw_walk_resumable_with(cx, text, |cx, rect, _| {
+            if style.underline {
+                self.draw_underline.color = style.color;
+                self.draw_underline.draw_abs(cx, rect);
+            }
+        });
     }
 }
 
@@ -106,6 +131,15 @@ impl Widget for TextFlow2 {
 }
 
 #[derive(Live, LiveHook, LiveRegister)]
+#[repr(C)]
+struct DrawUnderline {
+    #[deref]
+    draw_super: DrawQuad,
+    #[live]
+    color: Vec4,
+}
+
+#[derive(Live, LiveHook, LiveRegister)]
 #[live_ignore]
 pub struct TextStyles {
     #[live]
@@ -126,11 +160,12 @@ struct StyleStack {
 }
 
 impl StyleStack {
-    fn flatten(&self) -> FlattenedStyle {
+    fn flatten(&self, default_color: Vec4) -> FlattenedStyle {
         FlattenedStyle {
-            color: self.colors.last().copied(),
+            color: self.colors.last().copied().unwrap_or(default_color),
             bold: self.counts.bold != 0,
             italic: self.counts.italic != 0,
+            underline: self.counts.underline != 0,
         }
     }
 
@@ -144,6 +179,9 @@ impl StyleStack {
             }
             Style::Italic => {
                 self.counts.italic += 1;
+            }
+            Style::Underline => {
+                self.counts.underline += 1;
             }
         }
         self.styles.push(style);
@@ -161,6 +199,9 @@ impl StyleStack {
                 Style::Italic => {
                     self.counts.italic -= 1;
                 }
+                Style::Underline => {
+                    self.counts.underline -= 1;
+                }
             }
         }
     }
@@ -171,17 +212,20 @@ pub enum Style {
     Color(Vec4),
     Bold,
     Italic,
+    Underline,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 struct StyleCounts {
     bold: usize,
     italic: usize,
+    underline: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct FlattenedStyle {
-    color: Option<Vec4>,
+    color: Vec4,
     bold: bool,
     italic: bool,
+    underline: bool,
 }
