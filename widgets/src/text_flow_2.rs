@@ -12,6 +12,7 @@ live_design! {
     use makepad_draw::shader::std::*;
 
     pub DrawUnderline = {{DrawUnderline}} {}
+    pub DrawStrikethrough = {{DrawStrikethrough}} {}
 
     pub TextFlow2 = {{TextFlow2}} {
         draw_underline: {
@@ -20,7 +21,21 @@ live_design! {
             fn pixel(self) -> vec4 {
                 let sdf = Sdf2d::viewport(self.pos * self.rect_size);
                 sdf.hline(
-                    self.rect_size.y - 1.0,
+                    self.rect_size.y - 0.5,
+                    1.0
+                );
+                sdf.fill(self.color);
+                return sdf.result;
+            }
+        }
+
+        draw_strikethrough: {
+            draw_depth: 2.0,
+
+            fn pixel(self) -> vec4 {
+                let sdf = Sdf2d::viewport(self.pos * self.rect_size);
+                sdf.hline(
+                    0.65 * self.ascender,
                     1.0
                 );
                 sdf.fill(self.color);
@@ -41,9 +56,11 @@ live_design! {
 #[derive(Live, LiveHook, Widget)]
 pub struct TextFlow2 {
     #[live]
+    draw_underline: DrawUnderline,
+    #[live]
     draw_text: DrawText,
     #[live]
-    draw_underline: DrawUnderline,
+    draw_strikethrough: DrawStrikethrough,
 
     #[layout]
     layout: Layout,
@@ -102,10 +119,15 @@ impl TextFlow2 {
                 ..
             } => self.text_styles.bold_italic,
         };
-        self.draw_text.draw_walk_resumable_with(cx, text, |cx, rect, _| {
+        self.draw_text.draw_walk_resumable_with(cx, text, |cx, rect, ascender| {
             if style.underline {
                 self.draw_underline.color = style.color;
                 self.draw_underline.draw_abs(cx, rect);
+            }
+            if style.strikethrough {
+                self.draw_strikethrough.color = style.color;
+                self.draw_strikethrough.ascender = ascender;
+                self.draw_strikethrough.draw_abs(cx, rect);
             }
         });
     }
@@ -140,6 +162,17 @@ struct DrawUnderline {
 }
 
 #[derive(Live, LiveHook, LiveRegister)]
+#[repr(C)]
+struct DrawStrikethrough {
+    #[deref]
+    draw_super: DrawQuad,
+    #[live]
+    color: Vec4,
+    #[live]
+    ascender: f32,
+}
+
+#[derive(Live, LiveHook, LiveRegister)]
 #[live_ignore]
 pub struct TextStyles {
     #[live]
@@ -166,6 +199,7 @@ impl StyleStack {
             bold: self.counts.bold != 0,
             italic: self.counts.italic != 0,
             underline: self.counts.underline != 0,
+            strikethrough: self.counts.strikethrough != 0,
         }
     }
 
@@ -182,6 +216,9 @@ impl StyleStack {
             }
             Style::Underline => {
                 self.counts.underline += 1;
+            }
+            Style::Strikethrough => {
+                self.counts.strikethrough += 1;
             }
         }
         self.styles.push(style);
@@ -202,6 +239,9 @@ impl StyleStack {
                 Style::Underline => {
                     self.counts.underline -= 1;
                 }
+                Style::Strikethrough => {
+                    self.counts.strikethrough -= 1;
+                }
             }
         }
     }
@@ -213,6 +253,7 @@ pub enum Style {
     Bold,
     Italic,
     Underline,
+    Strikethrough,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -220,6 +261,7 @@ struct StyleCounts {
     bold: usize,
     italic: usize,
     underline: usize,
+    strikethrough: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -228,4 +270,5 @@ struct FlattenedStyle {
     bold: bool,
     italic: bool,
     underline: bool,
+    strikethrough: bool,
 }
