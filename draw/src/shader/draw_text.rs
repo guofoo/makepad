@@ -262,7 +262,7 @@ impl DrawText {
                 last_row.origin_in_lpxs.y - last_row.ascender_in_lpxs,
             ) * self.font_scale;
         let used_size_in_lpxs = text.size_in_lpxs * self.font_scale;
-       let new_turtle_pos = dvec2(new_turtle_pos.x as f64, new_turtle_pos.y as f64);
+        let new_turtle_pos = dvec2(new_turtle_pos.x as f64, new_turtle_pos.y as f64);
         let turtle = cx.turtle_mut();
         
         turtle.move_to(dvec2(origin_in_lpxs.x as f64, origin_in_lpxs.y as f64));
