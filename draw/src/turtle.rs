@@ -1984,17 +1984,18 @@ impl<'a,'b> Cx2d<'a,'b> {
             // of the descender of the current row.
             let current_row_ascender = current_row_height - current_row_metrics.descender;
             
+            let prev_row_metrics = self.turtle().prev_row_metrics;
+
             // If the current row is not the first row, compute the amount by which we have to shift
             // each finished walk for the current row so that the actual spacing between the
             // baseline of the previous and the current row is equal to the desired spacing.
             let line_spacing_shift = if self.turtle_is_at_first_row() {
-                0.0
+                -current_row_metrics.descender
             } else {
                 // After we've pushed down each finished walk for the current row so that their
                 // baseline aligns with the bottom of the current row, the actual spacing
                 // between the baseline of the previous and current row will be the height of
                 // the descender of the previous row, plus the height of the current row.
-                let prev_row_metrics = self.turtle().prev_row_metrics;
                 let actual_line_spacing = prev_row_metrics.descender + current_row_height;
 
                 // The desired spacing between the baseline of the previous and current row is
