@@ -2,7 +2,13 @@ use {
     crate::widget::*,
     makepad_draw::*,
     makepad_derive_widget::*,
-    makepad_draw::shader::draw_text::TextStyle
+    makepad_draw::{
+        shader::draw_text::TextStyle,
+        text::{
+            geom::{Point, Size},
+            layouter::{LaidoutRow, LaidoutText},
+        },
+    },
 };
 
 live_design! {
@@ -19,7 +25,7 @@ live_design! {
         height: Fit,
         flow: Right {
             row_align: Bottom,
-            wrap: false,
+            wrap: true,
         },
 
         font_size: (THEME_FONT_SIZE_P),
@@ -135,17 +141,32 @@ impl TextFlow2 {
             } => self.text_styles.bold_italic,
         };
         self.draw_text.text_style.font_size = style.font_size;
-        self.draw_text.debug = true;
+        self.draw_text.text_style.line_spacing = 1.5; // TODO: Remove
+        self.draw_text.debug = true; // TODO: Remove
         let laidout_text = self.draw_text.layout(
             cx,
             0.0,
-            0.0,
+             0.0,
             None,
             false,
             Align::default(),
             text
         );
-        self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text);
+        for laidout_row in laidout_text.rows.iter() {
+            let laidout_text_for_row = LaidoutText {
+                text: laidout_row.text.clone(),
+                size_in_lpxs: Size::new(
+                    laidout_row.width_in_lpxs,
+                    laidout_row.ascender_in_lpxs - laidout_row.descender_in_lpxs,
+                ),
+                rows: vec![LaidoutRow {
+                    origin_in_lpxs: Point::new(0.0, laidout_row.ascender_in_lpxs),
+                    ..laidout_row.clone()
+                }].into(),
+            };
+            self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
+            cx.turtle_new_line();
+        }
         
         /*
             if style.underline {

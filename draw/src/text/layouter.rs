@@ -293,7 +293,7 @@ impl LayoutContext {
             descender_in_lpxs,
             line_gap_in_lpxs,
             line_spacing_scale: self.options.line_spacing_scale,
-            glyphs,
+            glyphs: glyphs.into(),
         };
 
         self.current_point_in_lpxs.x = 0.0;
@@ -323,7 +323,7 @@ impl LayoutContext {
                     .unwrap_or(0.0),
                 self.current_point_in_lpxs.y - self.rows.last().unwrap().descender_in_lpxs,
             ),
-            rows: self.rows,
+            rows: self.rows.into(),
         }
     }
 }
@@ -637,7 +637,7 @@ impl PartialEq for LayoutOptions {
 pub struct LaidoutText {
     pub text: Substr,
     pub size_in_lpxs: Size<f32>,
-    pub rows: Vec<LaidoutRow>,
+    pub rows: Rc<Vec<LaidoutRow>>,
 }
 
 impl LaidoutText {
@@ -783,7 +783,7 @@ pub struct LaidoutRow {
     pub descender_in_lpxs: f32,
     pub line_gap_in_lpxs: f32,
     pub line_spacing_scale: f32,
-    pub glyphs: Vec<LaidoutGlyph>,
+    pub glyphs: Rc<Vec<LaidoutGlyph>>,
 }
 
 impl LaidoutRow {

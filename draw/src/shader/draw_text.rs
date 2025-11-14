@@ -185,15 +185,16 @@ impl DrawText {
                 .max_height(walk)
                 .map_or(size_in_lpxs.height, |max_height| max_height as f32),
         );
+        let last_laidout_row = laidout_text.rows.last().unwrap();
         let turtle_rect = cx.walk_turtle(Walk {
             abs_pos: walk.abs_pos,
             margin: walk.margin,
             width: turtle::Size::Fixed(max_size_in_lpxs.width as f64),
             height: turtle::Size::Fixed(max_size_in_lpxs.height as f64),
             metrics: Metrics {
-                descender: -laidout_text.rows.last().unwrap().descender_in_lpxs as f64,
-                line_gap: 0.0,
-                line_scale: 1.0,
+                descender: -last_laidout_row.descender_in_lpxs as f64,
+                line_gap: last_laidout_row.line_gap_in_lpxs as f64,
+                line_scale: last_laidout_row.line_spacing_scale as f64,
             }
         });
 
@@ -355,7 +356,7 @@ impl DrawText {
             return;
         };
         self.glyph_depth = self.draw_depth;
-        for row in &text.rows {
+        for row in text.rows.iter() {
             self.draw_row(
                 cx,
                 origin_in_lpxs + Size::from(row.origin_in_lpxs) * self.font_scale,
@@ -390,7 +391,7 @@ impl DrawText {
         row: &LaidoutRow,
         out_instances: &mut Vec<f32>,
     ) {
-        for glyph in &row.glyphs {
+        for glyph in row.glyphs.iter() {
             self.draw_glyph(
                 cx,
                 origin_in_lpxs + Size::from(glyph.origin_in_lpxs) * self.font_scale,

@@ -23,7 +23,10 @@ live_design!{
                                 return #000;
                             }
                         }
-                        <MyTextFlow> {}
+                        <MyTextFlow> {
+                            width: 500,
+                            height: 500,
+                        }
                     }
                 }
             }
@@ -64,11 +67,13 @@ impl Widget for MyTextFlow {
         walk: Walk,
     ) -> DrawStep {
         self.text_flow.begin(cx, walk);
-        self.text_flow.draw_text(cx, "abc");
+        self.text_flow.draw_text(cx, "abc\ndef\nghi\nklm");
+        /*
         self.text_flow.push_style(Style::FontSize(32.0));
         self.text_flow.draw_text(cx, "def");
         self.text_flow.pop_style();
         self.text_flow.draw_text(cx, "ghi");
+        */
         /*
         self.text_flow.push_style(Style::Strikethrough);
         self.text_flow.draw_text(cx, "I don't like 'em putting chemicals ");
