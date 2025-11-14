@@ -15,6 +15,22 @@ live_design! {
     pub DrawStrikethrough = {{DrawStrikethrough}} {}
 
     pub TextFlow2 = {{TextFlow2}} {
+        width: Fill,
+        height: Fit,
+        flow: Right {
+            row_align: Bottom,
+            wrap: false,
+        },
+
+        font_size: (THEME_FONT_SIZE_P),
+        font_color: (THEME_COLOR_TEXT),
+        text_styles: {
+            normal: <THEME_FONT_REGULAR> {},
+            bold: <THEME_FONT_BOLD> {},
+            italic: <THEME_FONT_ITALIC> {},
+            bold_italic: <THEME_FONT_BOLD_ITALIC> {},
+        }
+
         draw_underline: {
             draw_depth: 0.0,
 
@@ -42,14 +58,6 @@ live_design! {
                 return sdf.result;
             }
         }
-
-        default_color: (THEME_COLOR_TEXT),
-        text_styles: {
-            normal: <THEME_FONT_REGULAR> {},
-            bold: <THEME_FONT_BOLD> {},
-            italic: <THEME_FONT_ITALIC> {},
-            bold_italic: <THEME_FONT_BOLD_ITALIC> {},
-        }
     }
 }
 
@@ -64,9 +72,13 @@ pub struct TextFlow2 {
 
     #[layout]
     layout: Layout,
+    #[walk]
+    walk: Walk,
 
     #[live]
-    default_color: Vec4,
+    font_size: f32,
+    #[live]
+    font_color: Vec4,
     #[live]
     text_styles: TextStyles,
 
@@ -95,8 +107,11 @@ impl TextFlow2 {
     }
 
     pub fn draw_text(&mut self, cx: &mut Cx2d, text: &str) {
-        let style = self.styles.flatten(self.default_color);
-        self.draw_text.color = style.color;
+        let style = self.styles.flatten(
+            self.font_size,
+            self.font_color,
+        );
+        self.draw_text.color = style.font_color;
         self.draw_text.text_style = match style {
             FlattenedStyle {
                 bold: false,
@@ -119,17 +134,21 @@ impl TextFlow2 {
                 ..
             } => self.text_styles.bold_italic,
         };
-        self.draw_text.draw_walk_resumable_with(cx, text, |cx, rect, ascender| {
+        self.draw_text.text_style.font_size = style.font_size;
+        self.draw_text.debug = true;
+        self.draw_text.draw_walk(cx, Walk::fit(), Align::default(), text);
+        
+        /*
             if style.underline {
-                self.draw_underline.color = style.color;
+                self.draw_underline.color = style.font_color;
                 self.draw_underline.draw_abs(cx, rect);
             }
             if style.strikethrough {
-                self.draw_strikethrough.color = style.color;
+                self.draw_strikethrough.color = style.font_color;
                 self.draw_strikethrough.ascender = ascender;
                 self.draw_strikethrough.draw_abs(cx, rect);
             }
-        });
+        */
     }
 }
 
@@ -187,15 +206,17 @@ pub struct TextStyles {
 
 #[derive(Clone, Debug, Default)]
 struct StyleStack {
-    styles: Vec<Style>,
-    colors: Vec<Vec4>,
+    font_sizes: Vec<f32>,
+    font_colors: Vec<Vec4>,
     counts: StyleCounts,
+    styles: Vec<Style>,
 }
 
 impl StyleStack {
-    fn flatten(&self, default_color: Vec4) -> FlattenedStyle {
+    fn flatten(&self, default_font_size: f32, default_font_color: Vec4) -> FlattenedStyle {
         FlattenedStyle {
-            color: self.colors.last().copied().unwrap_or(default_color),
+            font_size: self.font_sizes.last().copied().unwrap_or(default_font_size),
+            font_color: self.font_colors.last().copied().unwrap_or(default_font_color),
             bold: self.counts.bold != 0,
             italic: self.counts.italic != 0,
             underline: self.counts.underline != 0,
@@ -205,8 +226,11 @@ impl StyleStack {
 
     fn push(&mut self, style: Style) {
         match style {
-            Style::Color(color) => {
-                self.colors.push(color);
+            Style::FontSize(font_size) => {
+                self.font_sizes.push(font_size);
+            }
+            Style::FontColor(font_color) => {
+                self.font_colors.push(font_color);
             }
             Style::Bold => {
                 self.counts.bold += 1;
@@ -227,8 +251,11 @@ impl StyleStack {
     fn pop(&mut self) {
         if let Some(style) = self.styles.pop() {
             match style {
-                Style::Color(_) => {
-                    self.colors.pop();
+                Style::FontSize(_) => {
+                    self.font_sizes.pop();
+                }
+                Style::FontColor(_) => {
+                    self.font_colors.pop();
                 },
                 Style::Bold => {
                     self.counts.bold -= 1;
@@ -249,7 +276,8 @@ impl StyleStack {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Style {
-    Color(Vec4),
+    FontSize(f32),
+    FontColor(Vec4),
     Bold,
     Italic,
     Underline,
@@ -266,7 +294,8 @@ struct StyleCounts {
 
 #[derive(Clone, Copy, Debug)]
 struct FlattenedStyle {
-    color: Vec4,
+    font_size: f32,
+    font_color: Vec4,
     bold: bool,
     italic: bool,
     underline: bool,

@@ -15,7 +15,16 @@ live_design!{
                     padding: {
                         top: 32,
                     }
-                    <MyTextFlow> {}
+                    <View> {
+                        height: Fit,
+                        show_bg: true,
+                        draw_bg: {
+                            fn pixel(self) -> vec4 {
+                                return #000;
+                            }
+                        }
+                        <MyTextFlow> {}
+                    }
                 }
             }
         }
@@ -55,11 +64,19 @@ impl Widget for MyTextFlow {
         walk: Walk,
     ) -> DrawStep {
         self.text_flow.begin(cx, walk);
+        self.text_flow.draw_text(cx, "abc");
+        self.text_flow.push_style(Style::FontSize(32.0));
+        self.text_flow.draw_text(cx, "def");
+        self.text_flow.pop_style();
+        self.text_flow.draw_text(cx, "ghi");
+        /*
         self.text_flow.push_style(Style::Strikethrough);
         self.text_flow.draw_text(cx, "I don't like 'em putting chemicals ");
         self.text_flow.draw_text(cx, "in the water that turn the freaking ");
         self.text_flow.push_style(Style::Bold);
+        self.text_flow.push_style(Style::FontSize(32.0));
         self.text_flow.draw_text(cx, "frogs");
+        self.text_flow.pop_style();
         self.text_flow.pop_style();
         self.text_flow.draw_text(cx, " gay. I'm gonna say it ");
         self.text_flow.push_style(Style::Italic);
@@ -68,33 +85,34 @@ impl Widget for MyTextFlow {
         self.text_flow.draw_text(cx, " slow for you: ");
         self.text_flow.push_style(Style::Bold);
         self.text_flow.push_style(Style::Italic);
-        self.text_flow.push_style(Style::Color(vec4(1.0, 0.0, 0.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 0.0, 0.0, 1.0)));
         self.text_flow.draw_text(cx, "G");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(1.0, 1.0, 0.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 1.0, 0.0, 1.0)));
         self.text_flow.draw_text(cx, "A");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(0.0, 1.0, 0.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(0.0, 1.0, 0.0, 1.0)));
         self.text_flow.draw_text(cx, "Y ");
         self.text_flow.pop_style();
         self.text_flow.draw_text(cx,  " ");
-        self.text_flow.push_style(Style::Color(vec4(0.0, 1.0, 1.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(0.0, 1.0, 1.0, 1.0)));
         self.text_flow.draw_text(cx, "F");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(0.0, 0.0, 1.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(0.0, 0.0, 1.0, 1.0)));
         self.text_flow.draw_text(cx, "R");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(1.0, 0.0, 1.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 0.0, 1.0, 1.0)));
         self.text_flow.draw_text(cx, "O");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(1.0, 0.0, 0.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 0.0, 0.0, 1.0)));
         self.text_flow.draw_text(cx, "G");
         self.text_flow.pop_style();
-        self.text_flow.push_style(Style::Color(vec4(1.0, 1.0, 0.0, 1.0)));
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 1.0, 0.0, 1.0)));
         self.text_flow.draw_text(cx, "S");
         self.text_flow.pop_style();
         self.text_flow.pop_style();
         self.text_flow.pop_style();
+        */
         self.text_flow.end(cx);
         DrawStep::done()
     }
