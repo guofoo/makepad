@@ -136,7 +136,16 @@ impl TextFlow2 {
         };
         self.draw_text.text_style.font_size = style.font_size;
         self.draw_text.debug = true;
-        self.draw_text.draw_walk(cx, Walk::fit(), Align::default(), text);
+        let laidout_text = self.draw_text.layout(
+            cx,
+            0.0,
+            0.0,
+            None,
+            false,
+            Align::default(),
+            text
+        );
+        self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text);
         
         /*
             if style.underline {
