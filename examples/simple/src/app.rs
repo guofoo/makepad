@@ -16,16 +16,17 @@ live_design!{
                         top: 32,
                     }
                     <View> {
+                        width: Fit,
                         height: Fit,
                         show_bg: true,
                         draw_bg: {
                             fn pixel(self) -> vec4 {
-                                return #000;
+                                return #444;
                             }
                         }
                         <MyTextFlow> {
-                            width: 500,
-                            height: 500,
+                            width: 100,
+                            height: 700,
                         }
                     }
                 }
@@ -67,7 +68,10 @@ impl Widget for MyTextFlow {
         walk: Walk,
     ) -> DrawStep {
         self.text_flow.begin(cx, walk);
-        self.text_flow.draw_text(cx, "abc\ndef\nghi\nklm");
+        self.text_flow.push_style(Style::FontColor(vec4(1.0, 0.0, 0.0, 1.0)));
+        self.text_flow.draw_text(cx, "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. ");
+        self.text_flow.push_style(Style::FontColor(vec4(0.0, 1.0, 0.0, 1.0)));
+        self.text_flow.draw_text(cx, "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. ");
         /*
         self.text_flow.push_style(Style::FontSize(32.0));
         self.text_flow.draw_text(cx, "def");

@@ -141,14 +141,23 @@ impl TextFlow2 {
             } => self.text_styles.bold_italic,
         };
         self.draw_text.text_style.font_size = style.font_size;
-        self.draw_text.text_style.line_spacing = 1.5; // TODO: Remove
-        self.draw_text.debug = true; // TODO: Remove
+        let first_row_max_width_in_lpxs = Some(cx.turtle().inner_width() as f32 - cx.turtle().pos().x as f32);
+        let max_width_in_lpxs = if !cx.turtle().inner_width().is_nan() {
+            Some(cx.turtle().inner_width() as f32)
+        } else {
+            None
+        };
+        let wrap = match cx.turtle().layout().flow {
+            Flow::Right { wrap: true, .. } => true,
+            _ => false
+        };
         let laidout_text = self.draw_text.layout(
             cx,
             0.0,
              0.0,
-            None,
-            false,
+            first_row_max_width_in_lpxs,
+            max_width_in_lpxs,
+            wrap,
             Align::default(),
             text
         );
@@ -165,7 +174,9 @@ impl TextFlow2 {
                 }].into(),
             };
             self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
-            cx.turtle_new_line();
+            if laidout_row.newline {
+                cx.turtle_new_line();
+            }
         }
         
         /*

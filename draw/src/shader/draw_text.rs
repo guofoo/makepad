@@ -143,8 +143,8 @@ impl LiveHook for DrawText {
 }
 
 impl DrawText {
-    pub fn draw_abs(&mut self, cx: &mut Cx2d, pos: Vec2d, text: &str) {
-        let text = self.layout(cx, 0.0, 0.0, None, false, Align::default(), text);
+    pub fn draw_abs(&mut self, cx: &mut Cx2d, pos: DVec2, text: &str) {
+        let text = self.layout(cx, 0.0, 0.0, None, None, false, Align::default(), text);
         self.draw_text(cx, Point::new(pos.x as f32, pos.y as f32), &text);
     }
 
@@ -163,7 +163,7 @@ impl DrawText {
         };
         let wrap = cx.turtle().layout().flow == Flow::Right { row_align: RowAlign::Top, wrap: true };
 
-        let text = self.layout(cx, 0.0, 0.0, max_width_in_lpxs, wrap, align, text);
+        let text = self.layout(cx, 0.0, 0.0, None, max_width_in_lpxs, wrap, align, text);
         self.draw_walk_laidout(cx, walk, &text)
     }
 
@@ -249,6 +249,7 @@ impl DrawText {
             cx,
             first_row_indent_in_lpxs,
             row_height as f32,
+            None,
             max_width_in_lpxs,
             wrap,
             Align::default(),
@@ -323,6 +324,7 @@ impl DrawText {
         cx: &mut Cx,
         first_row_indent_in_lpxs: f32,
         first_row_min_line_spacing_below_in_lpxs: f32,
+        first_row_max_width_in_lpxs: Option<f32>,
         max_width_in_lpxs: Option<f32>,
         wrap: bool,
         align: Align,
@@ -342,6 +344,7 @@ impl DrawText {
             options: LayoutOptions {
                 first_row_indent_in_lpxs,
                 first_row_min_line_spacing_below_in_lpxs,
+                first_row_max_width_in_lpxs,
                 max_width_in_lpxs,
                 wrap,
                 align: align.x as f32,

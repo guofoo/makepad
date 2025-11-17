@@ -158,6 +158,14 @@ impl LayoutContext {
         self.current_row_end - self.current_row_start
     }
 
+    fn current_row_max_width(&self) -> Option<f32> {
+        if self.current_row_is_first() {
+            self.options.first_row_max_width_in_lpxs
+        } else {
+            self.options.max_width_in_lpxs
+        }
+    }
+
     fn span_text(&self, len: usize) -> Substr {
         self.text
             .substr(self.current_row_end..self.current_row_end + len)
@@ -165,9 +173,7 @@ impl LayoutContext {
 
     fn remaining_width_in_lpxs(&self) -> Option<f32> {
         if self.options.wrap {
-            self.options
-                .max_width_in_lpxs
-                .map(|max_width_in_lpxs| max_width_in_lpxs - self.current_point_in_lpxs.x)
+            self.current_row_max_width().map(|current_row_max_width_in_lpxs| current_row_max_width_in_lpxs - self.current_point_in_lpxs.x)
         } else {
             None
         }
@@ -300,6 +306,7 @@ impl LayoutContext {
         self.current_point_in_lpxs.y += self.rows.last().map_or(row.ascender_in_lpxs, |prev_row| {
             prev_row.line_spacing_in_lpxs(&row)
         });
+        
         let max_width_in_lpxs = self.options.max_width_in_lpxs.unwrap_or(row.width_in_lpxs);
         let remaining_width_in_lpxs = max_width_in_lpxs - row.width_in_lpxs;
         row.origin_in_lpxs.x = self.options.align * remaining_width_in_lpxs;
@@ -577,6 +584,7 @@ pub struct LayoutOptions {
     // Note: currently does nothing. Only used by `TextFlow`. Should be removed once `TextFlow` is
     // replaced with `TextFlow2`.
     pub first_row_min_line_spacing_below_in_lpxs: f32,
+    pub first_row_max_width_in_lpxs: Option<f32>,
     pub max_width_in_lpxs: Option<f32>,
     pub wrap: bool,
     pub align: f32,
@@ -588,6 +596,7 @@ impl Default for LayoutOptions {
         Self {
             first_row_indent_in_lpxs: 0.0,
             first_row_min_line_spacing_below_in_lpxs: 0.0,
+            first_row_max_width_in_lpxs: None,
             max_width_in_lpxs: None,
             wrap: false,
             align: 0.0,

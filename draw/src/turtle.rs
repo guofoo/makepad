@@ -1975,12 +1975,8 @@ impl<'a,'b> Cx2d<'a,'b> {
 
     fn finish_row(&mut self, align_list_start: usize) {
         if let Flow::Right { row_align: RowAlign::Bottom, .. } = self.turtle().flow() {
-            println!("FINISH ROW");
-
             let current_row_height = self.turtle().row_height();
             let current_row_metrics = self.turtle().current_row_metrics;
-
-            println!("CURRENT ROW METRICS {:?}", current_row_metrics);
 
             // We're going to push down each finished walk for the current row so that their
             // baseline aligns with the bottom of the current row. Therefore, the height of the
@@ -1989,8 +1985,6 @@ impl<'a,'b> Cx2d<'a,'b> {
             let current_row_ascender = current_row_height - current_row_metrics.descender;
             
             let prev_row_metrics = self.turtle().prev_row_metrics;
-
-            println!("PREV ROW METRICS {:?}", prev_row_metrics);
 
             // If the current row is not the first row, compute the amount by which we have to shift
             // each finished walk for the current row so that the actual spacing between the
@@ -2004,15 +1998,11 @@ impl<'a,'b> Cx2d<'a,'b> {
                 // the descender of the previous row, plus the height of the current row.
                 let actual_line_spacing = prev_row_metrics.descender + current_row_height;
 
-                println!("ACTUAL LINE SPACING {:?}", actual_line_spacing);
-
                 // The desired spacing between the baseline of the previous and current row is
                 // the sum of the height of the descender and line gap of the previous row, and
                 // the ascender of the current row, scaled up by the line scale of the current
                 // row.
                 let desired_line_spacing = (prev_row_metrics.descender + prev_row_metrics.line_gap + current_row_ascender) * current_row_metrics.line_scale;
-
-                println!("DESIRED LINE SPACING {}", desired_line_spacing);
 
                 // The amount by which we have to shift each finished walk is the difference between
                 // the desired and the actual spacing.
