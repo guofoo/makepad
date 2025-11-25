@@ -68,20 +68,12 @@ impl Widget for MyTextFlow {
         walk: Walk,
     ) -> DrawStep {
         self.text_flow.begin(cx, walk);
-        self.text_flow.push_style(Style::FontColor(vec4(1.0, 0.0, 0.0, 1.0)));
-        self.text_flow.draw_text(cx, "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. ");
-        self.text_flow.push_style(Style::FontColor(vec4(0.0, 1.0, 0.0, 1.0)));
-        self.text_flow.draw_text(cx, "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. ");
-        /*
-        self.text_flow.push_style(Style::FontSize(32.0));
-        self.text_flow.draw_text(cx, "def");
-        self.text_flow.pop_style();
-        self.text_flow.draw_text(cx, "ghi");
-        */
-        /*
-        self.text_flow.push_style(Style::Strikethrough);
+        self.text_flow.push_style(Style::Underline);
         self.text_flow.draw_text(cx, "I don't like 'em putting chemicals ");
+        self.text_flow.pop_style();
+        self.text_flow.push_style(Style::Strikethrough);
         self.text_flow.draw_text(cx, "in the water that turn the freaking ");
+        self.text_flow.pop_style();
         self.text_flow.push_style(Style::Bold);
         self.text_flow.push_style(Style::FontSize(32.0));
         self.text_flow.draw_text(cx, "frogs");
@@ -121,7 +113,6 @@ impl Widget for MyTextFlow {
         self.text_flow.pop_style();
         self.text_flow.pop_style();
         self.text_flow.pop_style();
-        */
         self.text_flow.end(cx);
         DrawStep::done()
     }

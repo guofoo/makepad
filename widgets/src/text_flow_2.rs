@@ -38,7 +38,7 @@ live_design! {
         }
 
         draw_underline: {
-            draw_depth: 0.0,
+            draw_depth: 1.0,
 
             fn pixel(self) -> vec4 {
                 let sdf = Sdf2d::viewport(self.pos * self.rect_size);
@@ -51,8 +51,12 @@ live_design! {
             }
         }
 
-        draw_strikethrough: {
+        draw_text: {
             draw_depth: 2.0,
+        }
+
+        draw_strikethrough: {
+            draw_depth: 3.0,
 
             fn pixel(self) -> vec4 {
                 let sdf = Sdf2d::viewport(self.pos * self.rect_size);
@@ -173,23 +177,20 @@ impl TextFlow2 {
                     ..laidout_row.clone()
                 }].into(),
             };
-            self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
-            if laidout_row.newline {
-                cx.turtle_new_line();
-            }
-        }
-        
-        /*
+            let rect = self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
             if style.underline {
                 self.draw_underline.color = style.font_color;
                 self.draw_underline.draw_abs(cx, rect);
             }
             if style.strikethrough {
                 self.draw_strikethrough.color = style.font_color;
-                self.draw_strikethrough.ascender = ascender;
+                self.draw_strikethrough.ascender = laidout_text.rows.first().unwrap().ascender_in_lpxs;
                 self.draw_strikethrough.draw_abs(cx, rect);
             }
-        */
+            if laidout_row.newline {
+                cx.turtle_new_line();
+            }
+        }
     }
 }
 
