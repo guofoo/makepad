@@ -10,7 +10,7 @@ use {
             DrawListId,
         },
         draw_list_2d::DrawList2d,
-        turtle::{Turtle, FinishedWalk, Walk, AlignEntry},
+        turtle::{Turtle, FinishedRow, FinishedWalk, Walk, AlignEntry},
     },
 };
 
@@ -20,7 +20,7 @@ pub struct Cx2d<'a, 'b> {
     
     //pub (crate) overlay_sweep_lock: Option<Rc<RefCell<Area>>>,
     pub (crate) turtles: Vec<Turtle>,
-    pub (crate) finished_rows: Vec<usize>,
+    pub (crate) finished_rows: Vec<FinishedRow>,
     pub (crate) finished_walks: Vec<FinishedWalk>,
     pub (crate) turtle_clips: Vec<(Vec2d, Vec2d)>,
     pub (crate) align_list: Vec<AlignEntry>,

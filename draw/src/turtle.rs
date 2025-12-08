@@ -813,6 +813,23 @@ impl Turtle {
         dvec2(self.width(), self.height())
     }
 
+    /// Returns the y-position of the current row, relative to the origin of the turtle's rectangle.
+    pub fn row_y(&self) -> f64 {
+        self.pos().y - self.origin().y
+    }
+
+    /// Returns the height of the current row.
+    pub fn row_height(&self) -> f64 {
+        self.used_height - self.row_y()
+    }
+
+    /// Returns the offset to the next row.
+    ///
+    /// This is the height of the current row so far, plus the wrap spacing.
+    pub fn next_row_offset(&self) -> f64 {
+        self.row_height() + self.wrap_spacing
+    }
+
     pub fn base_width(&self, base: Base) -> f64 {
         match base {
             Base::Full => self.width(),
@@ -1249,6 +1266,16 @@ impl DeferredWalk {
     }
 }
 
+/// Represents a finished row.
+#[derive(Clone, Default, Debug)]
+pub struct FinishedRow {
+    /// The height of this finished row.
+    height: f64,
+
+    /// The start of the finished walks for this finished row.
+    finished_walks_start: usize
+}
+
 /// Represents a finished walk.
 #[derive(Clone, Default, Debug)]
 pub struct FinishedWalk {
@@ -1274,8 +1301,20 @@ impl<'a,'b> Cx2d<'a,'b> {
         self.turtles.last().unwrap()
     }
 
+    /// Returns `true` if the current turtle is at the first row.
     pub fn turtle_is_at_first_row(&self) -> bool {
         self.turtle().finished_rows_start == self.finished_rows.len()
+    }
+
+    /// Returns the number of finished rows for the current turtle.
+    pub fn turtle_finished_row_count(&self) -> usize {
+        self.finished_rows.len() - self.turtle().finished_rows_start
+    }
+
+    /// Returns the height of the `index`-th finished row for the current turtle.
+    pub fn turtle_finished_row_height(&self, index: usize) -> f64 {
+        debug_assert!(index < self.turtle_finished_row_count());
+        self.finished_rows[self.turtle().finished_rows_start + index].height
     }
 
     /// Returns true if the current turtle's next walk would be it's first.
@@ -2015,7 +2054,7 @@ impl<'a,'b> Cx2d<'a,'b> {
             let finished_walks_start = if self.turtle().finished_rows_start == self.finished_rows.len() {
                 self.turtle().finished_walks_start
             } else {
-                self.finished_rows[self.finished_rows.len() - 1]
+                self.finished_rows[self.finished_rows.len() - 1].finished_walks_start
             };
             let finished_walks_end = self.finished_walks.len();
             for finished_walk_index in finished_walks_start..finished_walks_end {
@@ -2045,7 +2084,10 @@ impl<'a,'b> Cx2d<'a,'b> {
 
         self.turtle_mut().prev_row_metrics = self.turtle().current_row_metrics;
         self.turtle_mut().current_row_metrics = Metrics::default();
-        self.finished_rows.push(self.finished_walks.len());
+        self.finished_rows.push(FinishedRow {
+            height: self.turtle().row_height(),
+            finished_walks_start: self.finished_walks.len()
+        });
     }
     
     fn move_align_list(&mut self, start: usize, end: usize, dx: f64, dy: f64, shift_clip: bool) {
@@ -2181,27 +2223,7 @@ pub struct TurtleAlignRange{
     pub end: usize
 }
 
-impl Turtle {
-    /// Returns the y-position of the current row.
-    pub fn row_y(&self) -> f64 {
-        self.pos().y - self.origin().y
-    }
-
-    /// Returns the height of the current row so far.
-    ///
-    /// This is the used height of the turtle's rectangle so far, minus the y-position of the
-    /// current row.
-    pub fn row_height(&self) -> f64 {
-        self.used_height - self.row_y()
-    }
-
-    /// Returns the offset to the next row.
-    ///
-    /// This is the height of the current row so far, plus the wrap spacing.
-    pub fn next_row_offset(&self) -> f64 {
-        self.row_height() + self.wrap_spacing
-    }
-    
+impl Turtle {    
     pub fn used(&self) -> Vec2d {
         dvec2(self.used_width, self.used_height)
     }

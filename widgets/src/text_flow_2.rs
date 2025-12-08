@@ -97,6 +97,8 @@ pub struct TextFlow2 {
     area: Area,
     #[rust]
     styles: StyleStack,
+    #[rust]
+    row_heights: Vec<f64>,
 }
 
 impl TextFlow2 {
@@ -105,6 +107,8 @@ impl TextFlow2 {
     }
 
     pub fn end(&mut self, cx: &mut Cx2d) {
+        let row_height = cx.turtle().row_height();
+        self.row_heights.push(row_height);
         cx.end_turtle_with_area(&mut self.area);
     }
 
@@ -177,7 +181,12 @@ impl TextFlow2 {
                     ..laidout_row.clone()
                 }].into(),
             };
+            let finished_row_count = cx.turtle_finished_row_count();
             let rect = self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
+            if cx.turtle_finished_row_count() != finished_row_count {
+                let row_height = cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1);
+                self.row_heights.push(row_height);
+            }
             if style.underline {
                 self.draw_underline.color = style.font_color;
                 self.draw_underline.draw_abs(cx, rect);
@@ -189,8 +198,22 @@ impl TextFlow2 {
             }
             if laidout_row.newline {
                 cx.turtle_new_line();
+                let row_height = cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1);
+                self.row_heights.push(row_height);
             }
         }
+    }
+
+    fn y_to_row_index(&self, y: f64) -> usize {
+        let mut row_y = 0.0;
+        for (row_index, row_height) in self.row_heights.iter().enumerate() {
+            let next_row_y = row_y + row_height;
+            if y < next_row_y {
+                return row_index;
+            }
+            row_y = next_row_y;
+        }
+        self.row_heights.len() - 1
     }
 }
 
@@ -206,10 +229,17 @@ impl Widget for TextFlow2 {
 
     fn handle_event(
         &mut self,
-        _cx: &mut Cx,
-        _event: &Event,
+        cx: &mut Cx,
+        event: &Event,
         _scope: &mut Scope)
     {
+        match event.hits(cx, self.area) {
+            Hit::FingerDown(event) if event.is_primary_hit() => {
+                let pos = event.abs - self.area.rect(cx).pos;
+                println!("Row index {:?}", self.y_to_row_index(pos.y));
+            }
+            _ => ()
+        }
     }
 }
 
