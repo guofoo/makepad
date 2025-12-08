@@ -80,6 +80,9 @@ pub struct TextFlow2 {
     #[live]
     draw_strikethrough: DrawStrikethrough,
 
+    #[redraw]
+    #[rust]
+    area: Area,
     #[layout]
     layout: Layout,
     #[walk]
@@ -92,23 +95,26 @@ pub struct TextFlow2 {
     #[live]
     text_styles: TextStyles,
 
-    #[redraw]
-    #[rust]
-    area: Area,
     #[rust]
     styles: StyleStack,
     #[rust]
-    row_heights: Vec<f64>,
+    rows: Vec<Row>,
+    #[rust]
+    items: Vec<Item>,
 }
 
 impl TextFlow2 {
     pub fn begin(&mut self, cx: &mut Cx2d, walk: Walk) {
+        self.rows.clear();
+        self.items.clear();
         cx.begin_turtle(walk, self.layout);
     }
 
     pub fn end(&mut self, cx: &mut Cx2d) {
-        let row_height = cx.turtle().row_height();
-        self.row_heights.push(row_height);
+        self.rows.push(Row {
+            height: cx.turtle().row_height(),
+            items_end: self.items.len()
+        });
         cx.end_turtle_with_area(&mut self.area);
     }
 
@@ -184,9 +190,17 @@ impl TextFlow2 {
             let finished_row_count = cx.turtle_finished_row_count();
             let rect = self.draw_text.draw_walk_laidout(cx, Walk::fit(), &laidout_text_for_row);
             if cx.turtle_finished_row_count() != finished_row_count {
-                let row_height = cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1);
-                self.row_heights.push(row_height);
+                self.rows.push(Row {
+                    height: cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1),
+                    items_end: self.items.len()
+                });
             }
+            let mut area = Area::Empty;
+            cx.add_aligned_rect_area(&mut area, rect);
+            self.items.push(Item {
+                area,
+                laidout_text: laidout_text_for_row,
+            });
             if style.underline {
                 self.draw_underline.color = style.font_color;
                 self.draw_underline.draw_abs(cx, rect);
@@ -198,22 +212,53 @@ impl TextFlow2 {
             }
             if laidout_row.newline {
                 cx.turtle_new_line();
-                let row_height = cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1);
-                self.row_heights.push(row_height);
+                self.rows.push(Row {
+                    height: cx.turtle_finished_row_height(cx.turtle_finished_row_count() - 1),
+                    items_end: self.items.len()
+                });
             }
         }
     }
 
-    fn y_to_row_index(&self, y: f64) -> usize {
-        let mut row_y = 0.0;
-        for (row_index, row_height) in self.row_heights.iter().enumerate() {
-            let next_row_y = row_y + row_height;
+    fn position_to_item_index(&self, cx: &Cx, position: DVec2) -> usize {
+        let row_index = self.y_to_row_index(cx, position.y);
+        self.row_index_and_x_to_item_index(cx, row_index, position.x)
+    }
+
+    fn y_to_row_index(&self, cx: &Cx, y: f64) -> usize {
+        let mut row_y = self.area.rect(cx).pos.y;
+        for (row_index, row) in self.rows.iter().enumerate() {
+            let next_row_y = row_y + row.height;
             if y < next_row_y {
                 return row_index;
             }
             row_y = next_row_y;
         }
-        self.row_heights.len() - 1
+        self.rows.len() - 1
+    }
+
+    fn row_index_and_x_to_item_index(&self, cx: &Cx, row_index: usize, x: f64) -> usize {
+        let items_start = self.row_items_start(row_index);
+        let items_end = self.row_items_end(row_index);
+        for item_index in items_start..items_end {
+            let item_rect = self.items[item_index].area.rect(cx);
+            if x < item_rect.pos.x + item_rect.size.x {
+                return item_index;
+            }
+        }
+        items_end - 1
+    }
+
+    fn row_items_start(&self, row_index: usize) -> usize {
+        if let Some(prev_row_index) = row_index.checked_sub(1) {
+            self.rows[prev_row_index].items_end
+        } else {
+            0
+        }
+    }
+
+    fn row_items_end(&self, row_index: usize) -> usize {
+        self.rows[row_index].items_end
     }
 }
 
@@ -235,8 +280,8 @@ impl Widget for TextFlow2 {
     {
         match event.hits(cx, self.area) {
             Hit::FingerDown(event) if event.is_primary_hit() => {
-                let pos = event.abs - self.area.rect(cx).pos;
-                println!("Row index {:?}", self.y_to_row_index(pos.y));
+                println!("Row index {:?}", self.y_to_row_index(cx, event.abs.y));
+                println!("Item index {:?}", self.position_to_item_index(cx, event.abs));
             }
             _ => ()
         }
@@ -372,4 +417,16 @@ struct FlattenedStyle {
     italic: bool,
     underline: bool,
     strikethrough: bool,
+}
+
+#[derive(Debug)]
+struct Row {
+    height: f64,
+    items_end: usize,
+}
+
+#[derive(Clone, Debug)]
+struct Item {
+    area: Area,
+    laidout_text: LaidoutText,
 }
