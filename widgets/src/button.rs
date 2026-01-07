@@ -471,13 +471,13 @@ pub struct Button {
 
     #[redraw]
     #[live]
-    draw_bg: DrawQuad,
+    pub draw_bg: DrawQuad,
     #[live]
-    draw_text: DrawText,
+    pub draw_text: DrawText,
     #[live]
-    draw_icon: DrawIcon,
+    pub draw_icon: DrawIcon,
     #[live]
-    icon_walk: Walk,
+    pub icon_walk: Walk,
     #[live]
     label_walk: Walk,
     #[walk]

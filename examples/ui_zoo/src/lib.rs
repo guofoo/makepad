@@ -4,6 +4,10 @@ pub mod layout_templates;
 pub mod demofiletree;
 
 pub mod tab_button;
+pub mod tab_accordion;
+pub mod accordion;
+pub mod datepicker;
+pub mod tab_datepicker;
 pub mod tab_checkbox;
 pub mod tab_commandtextinput;
 pub mod tab_desktopbutton;
@@ -19,6 +23,7 @@ pub mod tab_label;
 pub mod tab_layout;
 pub mod tab_linklabel;
 pub mod tab_markdown;
+
 pub mod tab_pageflip;
 pub mod tab_portallist;
 pub mod tab_radiobutton;

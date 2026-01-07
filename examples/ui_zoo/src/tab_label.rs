@@ -14,7 +14,13 @@ live_design!{
         }
         demos = {
             <H4> { text: "Standard" }
-            <Label> { text:"Default single line text" }
+            <Label> {
+                text:"Default single line text"
+                width: Fill
+                padding:10 
+                margin: 10
+                align: { x: 0.0, y: 0.5}
+            }
             
             <Hr> {}
             <H4> { text: "LabelGradientX" }

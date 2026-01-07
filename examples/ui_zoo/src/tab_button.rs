@@ -272,6 +272,108 @@ live_design!{
                     }
 
                 }
+
+
+<Button> {
+    // Allows instantiation of custom-styled elements.
+
+    // BUTTON SPECIFIC PROPERTIES
+
+    draw_bg: { // Shader object that draws the background.
+        fn get_color(self) -> vec4 { // Override the shader's fill method.
+            return mix( // State transition animations.
+                mix(
+                    self.color,
+                    mix(self.color, #f, 0.5),
+                    self.hover
+                ),
+                self.color_down,
+                self.down
+            )
+        }
+    },
+
+    draw_icon: { // Shader object that draws the icon.
+        svg_file: dep("crate://self/resources/icons/back.svg"),
+        // Icon file dependency.
+
+        fn get_color(self) -> vec4 { // Override the shader's fill method.
+            return mix( // State transition animations.
+                mix(
+                    self.color,
+                    mix(self.color, #f, 0.5),
+                    self.hover
+                ),
+                self.color_down,
+                self.down
+            )
+        }
+    },
+
+    draw_text: { // Shader object that draws the text.
+        wrap: Word, // Wraps text between words.
+
+        fn get_color(self) -> vec4 { // Override the shader's fill method.
+            return mix( // State transition animations.
+                mix(
+                    self.color,
+                    self.color_hover,
+                    self.hover
+                ),
+                self.color_down,
+                self.down
+            )
+        }
+    },
+
+    text: "I can be clicked", // Text label.
+
+    animator: { // State change animations.
+        hover = { // State definition.
+            default: off, // The state's starting point.
+
+            off = { // Behavior when transitioning to the 'off' state.
+                from: { // Transition behaviors from prior states.
+                    all: Forward { duration: 0.1 }, // Default animation direction and speed in seconds.
+                    down: Forward { duration: 0.25 } // Specific duration when coming from 'down' state.
+                },
+                apply: { // Properties to animate.
+                    draw_bg: { down: 0.0, hover: 0.0 }, // Target values for properties.
+                    draw_icon: { down: 0.0, hover: 0.0 },
+                    draw_text: { down: 0.0, hover: 0.0 }
+                }
+            },
+
+            on = { // Behavior when transitioning to the 'on' state.
+                from: {
+                    all: Forward { duration: 0.1 },
+                    down: Forward { duration: 0.5 }
+                },
+                apply: {
+                    draw_bg: { down: 0.0, hover: [{ time: 0.0, value: 1.0 }] },
+                    // 'hover' is animated from 0.0 to 1.0 starting at time 0.0.
+                    draw_icon: { down: 0.0, hover: [{ time: 0.0, value: 1.0 }] },
+                    draw_text: { down: 0.0, hover: [{ time: 0.0, value: 1.0 }] }
+                }
+            },
+
+            down = { // Behavior when transitioning to the 'down' state.
+                from: { all: Forward { duration: 0.2 } },
+                apply: {
+                    draw_bg: { down: [{ time: 0.0, value: 1.0 }], hover: 1.0 },
+                    draw_icon: { down: [{ time: 0.0, value: 1.0 }], hover: 1.0 },
+                    draw_text: { down: [{ time: 0.0, value: 1.0 }], hover: 1.0 }
+                }
+            }
+        }
+    },
+
+    // LAYOUT PROPERTIES
+    height: Fit,
+    width: Fit,
+}
+
+
             }
 
         }

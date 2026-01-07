@@ -9,7 +9,10 @@
         use crate::layout_templates::*;
 
         use crate::tab_button::*;
+        use crate::tab_accordion::*;
+        use crate::tab_datepicker::*;
         use crate::tab_checkbox::*;
+        use crate::accordion::*;
         // use crate::tab_commandtextinput::*;
         // use crate::tab_desktopbutton::*;
         use crate::tab_dropdown::*;
@@ -25,6 +28,7 @@
         use crate::tab_layout::*;
         use crate::tab_linklabel::*;
         use crate::tab_markdown::*;
+
         use crate::tab_pageflip::*;
         use crate::tab_portallist::*;
         use crate::tab_pageflip::*;
@@ -86,6 +90,8 @@
                             tabs: [
                                 tOverview,
                                 tLayoutDemos,
+                                tAccordion,
+                                tDatePicker,
                                 tButton,
                                 tCheckBox,
                                 // tCommandTextInput,
@@ -102,6 +108,7 @@
                                 tLabel,
                                 tLinkLabel,
                                 tMarkdown,
+
                                 tPageFlip,
                                 tPortalList,
                                 tRadioButton,
@@ -119,6 +126,8 @@
 
                         tOverview = Tab { name: "Intro", template: PermanentTab, kind: TabOverview }
                         tLayoutDemos = Tab { name: "Layout Demos", template: PermanentTab, kind: TabLayoutDemos }
+                        tAccordion = Tab { name: "Accordion", template: PermanentTab, kind: TabAccordion }
+                        tDatePicker = Tab { name: "DatePicker", template: PermanentTab, kind: TabDatePicker }
                         tButton = Tab { name: "Button", template: PermanentTab, kind: TabButton }
                         tCheckBox = Tab { name: "CheckBox", template: PermanentTab, kind: TabCheckBox }
                         // tCommandTextInput = Tab { name: "CommandTextInput", template: PermanentTab, kind: TabCommandTextInput }
@@ -135,6 +144,7 @@
                         tLabel = Tab { name: "Label", template: PermanentTab, kind: TabLabel }
                         tLinkLabel = Tab { name: "LinkLabel", template: PermanentTab, kind: TabLinkLabel }
                         tMarkdown = Tab { name: "Markdown", template: PermanentTab, kind: TabMarkdown }
+
                         tPageFlip = Tab { name: "PageFlip", template: PermanentTab, kind: TabPageFlip }
                         tPortalList = Tab { name: "PortalList", template: PermanentTab, kind: TabPortalList }
                         tRadioButton = Tab { name: "RadioButton", template: PermanentTab, kind: TabRadioButton }
@@ -148,6 +158,8 @@
                         
                         TabOverview = <UIZooTab> { <WidgetsOverview> {} }
                         TabLayoutDemos = <UIZooTab> { <DemoLayout> {} }
+                        TabAccordion = <UIZooTab> { <DemoAccordion> {} }
+                        TabDatePicker = <UIZooTab> { <DemoDatePicker> {} }
                         TabButton = <UIZooTab> { <DemoButton> {} }
                         TabCheckBox = <UIZooTab> { <DemoCheckBox> {} }
                         // TabCommandTextInput = <UIZooTab> { <DemoCommandTextInput> {} }
@@ -164,6 +176,7 @@
                         TabLabel = <UIZooTab> { <DemoLabel> {} }
                         TabLinkLabel = <UIZooTab> { <DemoLinkLabel> {} } 
                         TabMarkdown = <UIZooTab> { <DemoMarkdown> {} } 
+
                         TabPageFlip = <UIZooTab> { <DemoPageFlip> {} } 
                         TabPortalList = <UIZooTab> { <DemoPortalList> {} } 
                         TabRadioButton = <UIZooTab> { <DemoRadioButton> {} }
@@ -299,7 +312,11 @@ impl LiveRegister for App {
             crate::demofiletree::live_design(cx);
 
             crate::tab_button::live_design(cx);
-            crate::tab_checkbox::live_design(cx);
+            crate::tab_accordion::live_design(cx);
+        crate::accordion::live_design(cx);
+        crate::datepicker::live_design(cx);
+        crate::tab_datepicker::live_design(cx);
+        crate::tab_checkbox::live_design(cx);
             // crate::tab_commandtextinput::live_design(cx);
             // crate::tab_desktopbutton::live_design(cx);
             crate::tab_dropdown::live_design(cx);
@@ -315,6 +332,7 @@ impl LiveRegister for App {
             crate::tab_layout::live_design(cx);
             crate::tab_linklabel::live_design(cx);
             crate::tab_markdown::live_design(cx);
+
             crate::tab_pageflip::live_design(cx);
             crate::tab_portallist::live_design(cx);
             crate::tab_radiobutton::live_design(cx);

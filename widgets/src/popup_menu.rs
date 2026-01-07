@@ -296,6 +296,9 @@ live_design!{
     pub PopupMenuFlat = <PopupMenuBase> {
         width: 150., height: Fit,
         flow: Down,
+        clip_x: false,
+        clip_y: false,
+        margin: 10.0,
         padding: <THEME_MSPACE_1> {}
         
         menu_item: <PopupMenuItem> {}
@@ -314,9 +317,31 @@ live_design!{
 
             uniform gradient_fill_dir: 0.0
             uniform gradient_border_dir: 0.0
+            
+            uniform shadow_color: #0007
+            uniform shadow_radius: 10.0
+            uniform shadow_offset: vec2(2.0, 2.0)
+            
+            varying rect_size2: vec2
+            varying rect_size3: vec2
+            varying rect_pos2: vec2
+            varying rect_shift: vec2
+            varying sdf_rect_pos: vec2
+            varying sdf_rect_size: vec2
+
+            fn vertex(self) -> vec4 {
+                let min_offset = min(self.shadow_offset, vec2(0.0));
+                self.rect_size2 = self.rect_size + 2.0 * vec2(self.shadow_radius);
+                self.rect_size3 = self.rect_size2 + abs(self.shadow_offset);
+                self.rect_pos2 = self.rect_pos - vec2(self.shadow_radius) + min_offset;
+                self.sdf_rect_size = self.rect_size2 - vec2(self.shadow_radius * 2.0 + self.border_size * 2.0);
+                self.sdf_rect_pos = -min_offset + vec2(self.border_size + self.shadow_radius);
+                self.rect_shift = -min_offset;
+                return self.clip_and_transform_vertex(self.rect_pos2, self.rect_size3)
+            }
 
             fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
+                let sdf = Sdf2d::viewport(self.pos * self.rect_size3)
                 let dither = Math::random_2d(self.pos.xy) * 0.04 * self.color_dither;
 
                 let color_2 = self.color;
@@ -364,12 +389,25 @@ live_design!{
                 if (self.gradient_fill_horizontal > 0.5) {
                     gradient_fill_dir = gradient_fill.x;
                 }
+                
+                if sdf.shape > -1.0 {
+                    let m = self.shadow_radius;
+                    let o = self.shadow_offset + self.rect_shift;
+                    let v = GaussShadow::rounded_box_shadow(
+                        vec2(m) + o, 
+                        self.rect_size2 + o, 
+                        self.pos * (self.rect_size3 + vec2(m)), 
+                        self.shadow_radius * 0.5, 
+                        self.border_radius * 2.0
+                    );
+                    sdf.clear(self.shadow_color * v);
+                }
 
                 sdf.box(
-                    self.border_size,
-                    self.border_size,
-                    self.rect_size.x - self.border_size * 2.,
-                    self.rect_size.y - self.border_size * 2.,
+                    self.sdf_rect_pos.x,
+                    self.sdf_rect_pos.y,
+                    self.sdf_rect_size.x,
+                    self.sdf_rect_size.y,
                     self.border_radius
                 )
 
@@ -445,7 +483,7 @@ pub struct PopupMenu {
     
     #[live] draw_bg: DrawQuad,
     #[layout] layout: Layout,
-    #[walk] walk: Walk,
+    #[walk] pub walk: Walk,
     #[live] items: Vec<String>,
     #[rust] first_tap: bool,
     #[rust] menu_items: ComponentMap<PopupMenuItemId, PopupMenuItem>,

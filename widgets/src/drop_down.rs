@@ -525,9 +525,10 @@ impl DropDown {
                     }
 
                     let area = self.draw_bg.area().rect(cx);
+                    let margin = popup_menu.walk.margin;
                     let shift = DVec2 {
-                        x: 0.0,
-                        y: area.size.y,
+                        x: -margin.left,
+                        y: area.size.y - margin.top,
                     };
                     
                     popup_menu.end(cx, self.draw_bg.area(), shift);

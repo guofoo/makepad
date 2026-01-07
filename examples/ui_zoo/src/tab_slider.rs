@@ -212,6 +212,19 @@ live_design!{
                 <SliderRoundFlat> { text: "precision", precision: 20 }
                 <SliderRoundFlat> { text: "stepped", step: 0.1 }
 
+                <Hr> {}
+                <H4> { text: "SliderVertical"}
+                <View> {
+                    width: Fill, height: Fit
+                    flow: Right
+                    spacing: 20.
+                    
+                    <SliderVertical> { text: "Default" }
+                    <SliderVertical> { text: "min/max", min: 0., max: 100. }
+                    <SliderVertical> { text: "precision", precision: 20 }
+                    <SliderVertical> { text: "stepped", step: 0.1 }
+                }
+
             // <Hr> {}
             // <H4> { text: "Styling Attributes Reference" }
             // <Slider> {
