@@ -7,6 +7,9 @@ pub mod cx_shared;
 
 pub mod cx_stdin;
 
+#[cfg(feature = "system-fonts")]
+pub mod system_fonts;
+
 #[cfg(any(target_os = "macos", target_os="ios", target_os="tvos"))]
 pub mod apple;
 
@@ -15,6 +18,9 @@ pub use crate::os::apple::*;
 
 #[cfg(any(target_os = "macos", target_os="ios", target_os="tvos"))]
 pub use crate::os::apple::apple_media::*;
+
+#[cfg(all(feature = "system-fonts", any(target_os = "macos", target_os="ios", target_os="tvos")))]
+pub use crate::os::apple::system_fonts::get_system_font_provider;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

@@ -6,7 +6,7 @@ workspace.members = [
     "examples/teamtalk",
     "examples/fractal_zoom",
     "examples/layout",
-    "examples/simple",
+    "examples/fonts",
     "examples/ui_zoo",
     "examples/news_feed",
     "examples/web_cam",
