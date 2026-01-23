@@ -603,12 +603,12 @@ impl LiveHook for FontFamily {
                         };
                         fonts.define_font(
                             font_id,
-                            FontDefinition {
+                            FontDefinition::from_data_with_fudge(
                                 data,
-                                index: 0,
-                                ascender_fudge_in_ems: font.ascender_fudge,
-                                descender_fudge_in_ems: font.descender_fudge,
-                            },
+                                0,
+                                font.ascender_fudge,
+                                font.descender_fudge,
+                            ),
                         );
                     }
                     font_ids.push(font_id);

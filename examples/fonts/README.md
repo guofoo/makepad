@@ -1,12 +1,23 @@
-# makepad-example-simple
+# makepad-example-fonts
 
-A very simple example of a Makepad Framework application, used to illustrate the basic concepts of Makepad Framework. For an explanation of what Makepad Framework is, please see the README for the [makepad-widgets](https://crates.io/crates/makepad-widgets) crate.
+Test app for Makepad's system font support.
 
-The example consists of a chromeless window containing both a button and a label displaying a counter. Clicking the buttnon will increment the counter. It illustrates the basics of initializing an application,  handling events, drawing the UI, and working with the DSL.
+## Running
 
-The code for this example is fairly well commented, so it should be a good starting point for playing around with Makepad Framework.
+```bash
+# With bundled fonts (default)
+cargo run -p makepad-fonts --release
 
-## Contact
+# With system fonts
+cargo run -p makepad-fonts --no-default-features --features system-fonts --release
+```
 
-If you have any questions/suggestions, feel free to reach out to us on our discord channel:
-https://discord.com/invite/urEMqtMcSd=
+## What it Shows
+
+- Multilingual text: Chinese, Japanese, Russian, English
+- System font rendering on macOS/Windows/Linux
+
+## Related
+
+- `docs/plans/2026-01-22-system-font-support.md` - Implementation docs
+- `platform/src/os/*/system_fonts.rs` - Platform providers

@@ -28,6 +28,9 @@ pub mod windows;
 #[cfg(target_os = "windows")]
 pub use crate::os::windows::*;
 
+#[cfg(all(feature = "system-fonts", target_os = "windows"))]
+pub use crate::os::windows::system_fonts::get_system_font_provider;
+
 //#[cfg(target_os = "windows")]
 //pub use crate::os::windows::windows_media::*;
 
@@ -42,6 +45,9 @@ pub use crate::os::linux::android::android_media::*;
 
 #[cfg(all(target_os = "linux", not(target_env="ohos")))]
 pub use crate::os::linux::linux_media::*;
+
+#[cfg(all(feature = "system-fonts", target_os = "linux", not(any(target_env = "ohos", target_os = "android"))))]
+pub use crate::os::linux::system_fonts::get_system_font_provider;
 
 #[cfg(target_env="ohos")]
 pub use crate::os::linux::open_harmony::oh_media::*;

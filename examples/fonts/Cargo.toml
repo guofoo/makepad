@@ -9,3 +9,8 @@ metadata.makepad-auto-version = "EVyKRfOGV339Re5CS45PMHHxw_M="
 
 [dependencies]
 makepad-widgets = { path = "../../widgets", version = "1.0.0" }
+
+[features]
+default = ["bundled-fonts"]
+bundled-fonts = ["makepad-widgets/bundled-fonts"]
+system-fonts = ["makepad-widgets/system-fonts"]
