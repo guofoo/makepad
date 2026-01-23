@@ -23,6 +23,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn test_macos_cjk_font() {
+        // STHeiti is used for CJK fallback (PingFang SC is a stub font without outlines)
+        let provider = makepad_platform::os::get_system_font_provider();
+        let result = provider.query_font("STHeiti");
+        assert!(result.is_ok(), "STHeiti should be available for CJK");
+        assert!(!result.unwrap().data.is_empty());
+    }
+
+    #[test]
     #[cfg(target_os = "windows")]
     fn test_windows_query_font() {
         let provider = makepad_platform::os::get_system_font_provider();
