@@ -615,6 +615,35 @@ impl LiveHook for FontFamily {
                 }
                 next_child_index = nodes.next_child(child_index);
             }
+
+            // Add system font fallback for CJK when system-fonts feature is enabled
+            // Note: PingFang SC on macOS is a stub font without outlines, use STHeiti instead
+            // STHeiti covers Chinese, Japanese, and Korean characters
+            #[cfg(all(feature = "system-fonts", target_os = "macos"))]
+            {
+                let cjk_font_id: FontId = "SystemCJKFallback".into();
+                if !fonts.is_font_known(cjk_font_id) {
+                    fonts.define_font(cjk_font_id, FontDefinition::from_system("STHeiti"));
+                }
+                font_ids.push(cjk_font_id);
+            }
+            #[cfg(all(feature = "system-fonts", target_os = "windows"))]
+            {
+                let cjk_font_id: FontId = "SystemCJKFallback".into();
+                if !fonts.is_font_known(cjk_font_id) {
+                    fonts.define_font(cjk_font_id, FontDefinition::from_system("Microsoft YaHei"));
+                }
+                font_ids.push(cjk_font_id);
+            }
+            #[cfg(all(feature = "system-fonts", target_os = "linux"))]
+            {
+                let cjk_font_id: FontId = "SystemCJKFallback".into();
+                if !fonts.is_font_known(cjk_font_id) {
+                    fonts.define_font(cjk_font_id, FontDefinition::from_system("Noto Sans CJK SC"));
+                }
+                font_ids.push(cjk_font_id);
+            }
+
             fonts.define_font_family(font_family_id, FontFamilyDefinition { font_ids });
         }
 
