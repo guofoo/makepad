@@ -206,6 +206,54 @@ cargo run -p makepad-example-ui-zoo --no-default-features --features system-font
 | `widgets/src/theme_desktop_light.rs` | Removed chinese/emoji font refs |
 | `widgets/src/theme_desktop_skeleton.rs` | Removed chinese/emoji font refs |
 
+## CJK Font Fallback
+
+When using `system-fonts`, CJK (Chinese/Japanese/Korean) text rendering requires special handling due to platform-specific font availability.
+
+### Automatic CJK Fallback Injection
+
+The system automatically adds CJK fallback fonts to all DSL-defined font families when `system-fonts` is enabled. This happens in `draw/src/shader/draw_text.rs` during font family initialization.
+
+### Platform-Specific CJK Fonts
+
+| Platform | CJK Font | Notes |
+|----------|----------|-------|
+| macOS | STHeiti | PingFang SC is a stub font (see below) |
+| Windows | Microsoft YaHei | Standard CJK font |
+| Linux | Noto Sans CJK SC | Requires font package installation |
+
+### macOS Font Limitations
+
+**Important:** Modern macOS system fonts like PingFang SC are "stub fonts" - they contain no glyph outlines (`glyf`, `CFF`, or `CFF2` tables). macOS renders these fonts through private APIs that third-party apps cannot access.
+
+**Symptoms of stub font usage:**
+- Text appears as empty spaces (not boxes)
+- Glyph IDs are found by the shaper but rasterization fails
+- Font file loads successfully but has no outline tables
+
+**Solution:** Use older fonts with proper TrueType outlines:
+- STHeiti (CJK) - Has `glyf` table
+- Hiragino Sans (Japanese) - Has outlines
+- Songti (Chinese) - Has `glyf` table
+
+**Fonts to avoid on macOS:**
+- PingFang SC/TC/HK - Stub fonts
+- SF Pro - Stub font
+- Apple system fonts prefixed with "." - Internal stub fonts
+
+### Verifying Font Outlines
+
+To check if a font has proper outlines:
+
+```python
+from fontTools import ttLib
+
+font = ttLib.TTFont("/path/to/font.ttf", fontNumber=0)
+has_outlines = 'glyf' in font or 'CFF ' in font or 'CFF2' in font
+print(f"Has outlines: {has_outlines}")
+print(f"Tables: {list(font.keys())}")
+```
+
 ## Integration Example: moly-ai
 
 The moly-ai project uses makepad-fonts with system fonts:
@@ -224,3 +272,32 @@ makepad-draw = { path = "../makepad-fonts/draw" }
 makepad-platform = { path = "../makepad-fonts/platform" }
 math_widget = { path = "../makepad-fonts/libs/math_widget" }
 ```
+
+## Troubleshooting
+
+### CJK Text Shows as Empty Spaces
+
+**Cause:** The system font provider loaded a stub font without glyph outlines.
+
+**Solution:**
+1. Check which font is being loaded (add debug print to `system_fonts.rs`)
+2. Verify the font has outline tables using fontTools
+3. Switch to a font with proper outlines (STHeiti on macOS)
+
+### CJK Text Shows as Boxes (Tofu)
+
+**Cause:** No CJK fallback font is available or the fallback doesn't cover the character.
+
+**Solution:**
+1. Verify CJK font is installed on the system
+2. Check that `system-fonts` feature is enabled
+3. Ensure the automatic fallback injection is working
+
+### Font Loading Errors
+
+**Cause:** System font provider cannot find or read the font file.
+
+**Solution:**
+1. Verify font is installed: `system_profiler SPFontsDataType | grep FontName`
+2. Check font file permissions
+3. On Linux, ensure fontconfig is installed and configured

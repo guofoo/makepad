@@ -70,7 +70,8 @@ pub fn define(loader: &mut Loader) {
             },
         );
         loader.define_font("System Sans".into(), FontDefinition::from_system("Helvetica Neue"));
-        // Note: PingFang SC is a stub font without outlines, use STHeiti instead
+        // Note: PingFang SC is a stub font without glyph outlines (macOS renders via private APIs)
+        // Use STHeiti which has proper TrueType outlines
         loader.define_font("System CJK".into(), FontDefinition::from_system("STHeiti"));
         loader.define_font("System Mono".into(), FontDefinition::from_system("Menlo"));
     }

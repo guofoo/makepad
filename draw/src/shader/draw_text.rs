@@ -616,13 +616,41 @@ impl LiveHook for FontFamily {
                 next_child_index = nodes.next_child(child_index);
             }
 
-            // Add system font fallback for CJK when system-fonts feature is enabled
+            // Add CJK fallback fonts automatically
+            // For bundled-fonts: use embedded Chinese font from widgets/resources
+            // For system-fonts: use OS system font
+            #[cfg(all(feature = "bundled-fonts", not(feature = "system-fonts")))]
+            {
+                // Use pre-included fonts from builtins module
+                use crate::text::builtins::{LXG_WEN_KAI_REGULAR, NOTO_COLOR_EMOJI};
+
+                let cjk_font_id: FontId = "BundledCJKFallback".into();
+                if !fonts.is_font_known(cjk_font_id) {
+                    fonts.define_font(
+                        cjk_font_id,
+                        FontDefinition::from_data(LXG_WEN_KAI_REGULAR.to_vec().into(), 0),
+                    );
+                }
+                font_ids.push(cjk_font_id);
+
+                let emoji_font_id: FontId = "BundledEmojiFallback".into();
+                if !fonts.is_font_known(emoji_font_id) {
+                    fonts.define_font(
+                        emoji_font_id,
+                        FontDefinition::from_data(NOTO_COLOR_EMOJI.to_vec().into(), 0),
+                    );
+                }
+                font_ids.push(emoji_font_id);
+            }
+
+            // System font fallback for CJK when system-fonts feature is enabled
             // Note: PingFang SC on macOS is a stub font without outlines, use STHeiti instead
-            // STHeiti covers Chinese, Japanese, and Korean characters
             #[cfg(all(feature = "system-fonts", target_os = "macos"))]
             {
                 let cjk_font_id: FontId = "SystemCJKFallback".into();
                 if !fonts.is_font_known(cjk_font_id) {
+                    // Note: PingFang SC is a stub font without glyph outlines
+                    // Use STHeiti which has proper TrueType outlines
                     fonts.define_font(cjk_font_id, FontDefinition::from_system("STHeiti"));
                 }
                 font_ids.push(cjk_font_id);
