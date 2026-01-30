@@ -10,6 +10,7 @@ use crate::opcode::*;
 use crate::vm::ScriptCode;
 use crate::thread::*;
 use crate::trap::*;
+use crate::*;
 
 impl ScriptThread {
     // IF handlers
@@ -133,6 +134,17 @@ impl ScriptThread {
     pub(crate) fn handle_range(&mut self, heap: &mut ScriptHeap, code: &ScriptCode) {
         let end = self.pop_stack_resolved(heap);
         let start = self.pop_stack_resolved(heap);
+        // Validate that both operands are numbers
+        if !start.is_number() {
+            self.push_stack_unchecked(script_err_type_mismatch!(self.trap, "range must start with a number, did you forget a , before a splat operator?"));
+            self.trap.goto_next();
+            return;
+        }
+        if !end.is_number() {
+            self.push_stack_unchecked(script_err_type_mismatch!(self.trap, "range end must be a number"));
+            self.trap.goto_next();
+            return;
+        }
         let range = heap.new_with_proto(code.builtins.range.into());
         heap.set_value_def(range, id!(start).into(), start);
         heap.set_value_def(range, id!(end).into(), end);
@@ -185,7 +197,7 @@ impl ScriptThread {
     // Try / OK handlers
     
     pub(crate) fn handle_ok_test(&mut self, opargs: OpcodeArgs) {
-        self.last_err = NIL;
+        //self.last_err = NIL;
         self.tries.push(TryFrame{
             push_nil: true,
             start_ip: self.trap.ip(),
@@ -201,7 +213,7 @@ impl ScriptThread {
     }
     
     pub(crate) fn handle_try_test(&mut self, opargs: OpcodeArgs) {
-        self.last_err = NIL;
+        //self.last_err = NIL;
         self.tries.push(TryFrame{
             push_nil: false,
             start_ip: self.trap.ip(),

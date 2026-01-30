@@ -3,8 +3,9 @@ use crate::value::*;
 use crate::pod::*;
 use crate::shader::ShaderType;
 use crate::trap::ScriptTrap;
+use crate::*;
 
-pub fn type_table_neg(val: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_neg(val: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let r = match val{
         ShaderType::AbstractInt => ShaderType::AbstractInt,
         ShaderType::AbstractFloat => ShaderType::AbstractFloat,
@@ -23,12 +24,12 @@ pub fn type_table_neg(val: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBui
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_opcode_not_defined_for_shader_type();
+        script_err_shader!(trap, "opcode not defined for type");
     }
     r
 }
 
-pub fn type_table_float_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_float_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let r = match lhs{
         ShaderType::AbstractFloat => match rhs{
             ShaderType::AbstractFloat=>ShaderType::AbstractFloat,
@@ -297,12 +298,12 @@ pub fn type_table_float_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:&Scr
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_no_wgsl_conversion_available();
+        script_err_shader!(trap, "no wgsl conversion");
     }
     r
 }
     
-pub fn type_table_int_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_int_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let r = match lhs{
         ShaderType::AbstractFloat => match rhs{
             _=>ShaderType::Error(NIL),
@@ -352,12 +353,12 @@ pub fn type_table_int_arithmetic(lhs: &ShaderType, rhs: &ShaderType, trap:&Scrip
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_no_wgsl_conversion_available();
+        script_err_shader!(trap, "no wgsl conversion");
     }
     r
 }
 
-pub fn type_table_logic(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_logic(lhs: &ShaderType, rhs: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let bool_ty = ShaderType::Pod(builtins.pod_bool);
     let r = match lhs{
         ShaderType::Pod(x) if *x == builtins.pod_bool => match rhs{
@@ -367,12 +368,12 @@ pub fn type_table_logic(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, bu
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_no_wgsl_conversion_available();
+        script_err_shader!(trap, "no wgsl conversion");
     }
     r
 }
 
-pub fn type_table_eq(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_eq(lhs: &ShaderType, rhs: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let bool_ty = ShaderType::Pod(builtins.pod_bool);
     let vec2b_ty = ShaderType::Pod(builtins.pod_vec2b);
     let vec3b_ty = ShaderType::Pod(builtins.pod_vec3b);
@@ -462,12 +463,12 @@ pub fn type_table_eq(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, built
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_no_wgsl_conversion_available();
+        script_err_shader!(trap, "no wgsl conversion");
     }
     r
 }
 
-pub fn type_table_if_else(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
+pub fn type_table_if_else(lhs: &ShaderType, rhs: &ShaderType, trap:ScriptTrap, builtins:&ScriptPodBuiltins )->ShaderType{
     let r = match lhs{
         ShaderType::AbstractFloat => match rhs{
              ShaderType::AbstractFloat => ShaderType::AbstractFloat,
@@ -490,12 +491,12 @@ pub fn type_table_if_else(lhs: &ShaderType, rhs: &ShaderType, trap:&ScriptTrap, 
         _=>ShaderType::Error(NIL),
     };
     if let ShaderType::Error(_) = r{
-        trap.err_if_else_type_different();
+        script_err_inconsistent!(trap, "if-else type mismatch");
     }
     r
 }
 
-pub fn type_table_elem_type(ty: &ScriptPodTy, _trap: &ScriptTrap, builtins: &ScriptPodBuiltins) -> Option<ScriptPodType> {
+pub fn type_table_elem_type(ty: &ScriptPodTy, _trap: ScriptTrap, builtins: &ScriptPodBuiltins) -> Option<ScriptPodType> {
     match ty {
         ScriptPodTy::FixedArray{ty, ..} => Some(ty.self_ref),
         ScriptPodTy::VariableArray{ty, ..} => Some(ty.self_ref),

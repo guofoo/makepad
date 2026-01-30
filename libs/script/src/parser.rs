@@ -67,6 +67,7 @@ enum State{
     EmitFnArgDyn{index:u32},
     
     EmitUnary{what_op:LiveId, index:u32},
+    EmitSplat{index:u32},
     EmitOp{what_op:LiveId, index:u32},
     EmitFieldAssign{what_op:LiveId, index:u32},
     EmitIndexAssign{what_op:LiveId, index:u32},
@@ -74,6 +75,10 @@ enum State{
     EndBare,
     EndBareSquare,
     EndProto,
+    EndProtoInherit,
+    EndScopeInherit,
+    EndFieldInherit,
+    EndIndexInherit,
     EndRound,
     
     CallMaybeDo{is_method:bool, index:u32},
@@ -144,7 +149,7 @@ impl State{
             id!(&&)  => 16,
             id!(||) | id!(|?)  => 17,
             id!(..) =>  18,
-            id!(:) | id!(=) | id!(>:) | id!(<:) | id!(^:) | id!(+=)  | id!(-=) | id!(*=) | id!(/=) | id!(%=) => 19,
+            id!(:) | id!(=) | id!(>:) | id!(<:) | id!(^:) | id!(+:) | id!(+=)  | id!(-=) | id!(*=) | id!(/=) | id!(%=) => 19,
             id!(&=) | id!(|=)  | id!(^=) | id!(<<=) | id!(>>=) | id!(?=) => 20,
             _=>0
         }
@@ -152,7 +157,7 @@ impl State{
     
     fn is_assign_operator(op:LiveId)->bool{
         match op{
-            id!(=) | id!(:) | id!(+=) | id!(<:) | id!(+=) |
+            id!(=) | id!(:) | id!(+=) | id!(<:) | id!(+:) | id!(+=) |
             id!(-=) | id!(*=) | id!(/=) |
             id!(%=) | id!(&=) | id!(|=) | 
             id!(^=) | id!(<<=) | id!(>>=) | 
@@ -173,7 +178,7 @@ impl State{
     
     fn operator_to_field_assign(op:LiveId)->ScriptValue{
         match op{
-            id!(=) => Opcode::ASSIGN_FIELD,
+            id!(=) | id!(:) => Opcode::ASSIGN_FIELD,
             id!(+=) => Opcode::ASSIGN_FIELD_ADD,
             id!(-=) => Opcode::ASSIGN_FIELD_SUB,
             id!(*=) => Opcode::ASSIGN_FIELD_MUL,
@@ -507,7 +512,12 @@ impl ScriptParser{
                 }
             }
             State::Let{index}=>{
-                if id.not_empty(){ // lets expect an assignment expression
+                if id == id!(mut) {
+                    // "let mut" is treated as "var"
+                    self.state.push(State::Var{index});
+                    return 1
+                }
+                else if id.not_empty(){ // lets expect an assignment expression
                     // push the id on to the stack
                     self.push_code(id.into(), self.index);
                     self.state.push(State::LetDynOrTyped{index});
@@ -841,6 +851,10 @@ impl ScriptParser{
                 self.push_code(State::operator_to_unary(what_op), index);
                 return 0
             }
+            State::EmitSplat{index}=>{
+                self.push_code(Opcode::ME_SPLAT.into(), index);
+                return 0
+            }
             State::EmitReturn{index}=>{
                 self.push_code(Opcode::RETURN.into(), index);
                 return 0
@@ -882,6 +896,58 @@ impl ScriptParser{
             // emit the create prototype instruction
             State::EndProto=>{
                 self.push_code(Opcode::END_PROTO.into(), self.index);
+                self.state.push(State::EndExpr);
+                if tok.is_close_curly() {
+                    return 1
+                }
+                else {
+                    error!(self, tokenizer, "Expected }} not found");
+                    return 0
+                }
+            }
+            // emit prototype instruction + proto inherit write (for +: operator)
+            State::EndProtoInherit=>{
+                self.push_code(Opcode::END_PROTO.into(), self.index);
+                self.push_code(Opcode::PROTO_INHERIT_WRITE.into(), self.index);
+                self.state.push(State::EndExpr);
+                if tok.is_close_curly() {
+                    return 1
+                }
+                else {
+                    error!(self, tokenizer, "Expected }} not found");
+                    return 0
+                }
+            }
+            // emit prototype instruction + scope inherit write (for value += {} operator)
+            State::EndScopeInherit=>{
+                self.push_code(Opcode::END_PROTO.into(), self.index);
+                self.push_code(Opcode::SCOPE_INHERIT_WRITE.into(), self.index);
+                self.state.push(State::EndExpr);
+                if tok.is_close_curly() {
+                    return 1
+                }
+                else {
+                    error!(self, tokenizer, "Expected }} not found");
+                    return 0
+                }
+            }
+            // emit prototype instruction + field inherit write (for obj.field += {} operator)
+            State::EndFieldInherit=>{
+                self.push_code(Opcode::END_PROTO.into(), self.index);
+                self.push_code(Opcode::FIELD_INHERIT_WRITE.into(), self.index);
+                self.state.push(State::EndExpr);
+                if tok.is_close_curly() {
+                    return 1
+                }
+                else {
+                    error!(self, tokenizer, "Expected }} not found");
+                    return 0
+                }
+            }
+            // emit prototype instruction + index inherit write (for obj[index] += {} operator)
+            State::EndIndexInherit=>{
+                self.push_code(Opcode::END_PROTO.into(), self.index);
+                self.push_code(Opcode::INDEX_INHERIT_WRITE.into(), self.index);
                 self.state.push(State::EndExpr);
                 if tok.is_close_curly() {
                     return 1
@@ -1177,20 +1243,50 @@ impl ScriptParser{
                     return 1
                 }
                 if tok.is_open_curly(){
-                    /*
-                    if let Some(State::EmitUnary{what_op:id!(+),..}) = self.state.last(){
+                    // Check if there's a pending +: operator for proto-inherit
+                    if let Some(State::EmitOp{what_op:id!(+:),..}) = self.state.last(){
                         self.state.pop();
-                        if let Some(State::EmitOp{what_op:id!(:),..}) = self.state.last(){
-                            // ok so we need to emit BEGIN_PROTO_ME
-                            self.push_code(Opcode::BEGIN_PROTO_ME.into(), self.index);
-                            self.state.push(State::EndBare);
-                            self.state.push(State::BeginStmt(false));
-                            return 1
-                        }
-                        else{
-                            error!(self, tokenizer, "Found +{{ protoinherit. Left hand side must be field:")
-                        }
-                    }*/
+                        // Proto-inherit operator: field +: { ... }
+                        // Emit PROTO_INHERIT_READ to read field and push proto value
+                        self.push_code(Opcode::PROTO_INHERIT_READ.into(), self.index);
+                        self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                        self.state.push(State::EndProtoInherit);
+                        self.state.push(State::BeginStmt{last_was_sep:false});
+                        return 1
+                    }
+                    // Check if there's a pending += operator for scope-inherit
+                    if let Some(State::EmitOp{what_op:id!(+=),..}) = self.state.last(){
+                        self.state.pop();
+                        // Scope-inherit operator: value += { ... }
+                        // Emit SCOPE_INHERIT_READ to read variable and push proto value
+                        self.push_code(Opcode::SCOPE_INHERIT_READ.into(), self.index);
+                        self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                        self.state.push(State::EndScopeInherit);
+                        self.state.push(State::BeginStmt{last_was_sep:false});
+                        return 1
+                    }
+                    // Check if there's a pending field += for field-inherit
+                    if let Some(State::EmitFieldAssign{what_op:id!(+=),..}) = self.state.last(){
+                        self.state.pop();
+                        // Field-inherit operator: obj.field += { ... }
+                        // Emit FIELD_INHERIT_READ to read field and push proto value
+                        self.push_code(Opcode::FIELD_INHERIT_READ.into(), self.index);
+                        self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                        self.state.push(State::EndFieldInherit);
+                        self.state.push(State::BeginStmt{last_was_sep:false});
+                        return 1
+                    }
+                    // Check if there's a pending index += for index-inherit
+                    if let Some(State::EmitIndexAssign{what_op:id!(+=),..}) = self.state.last(){
+                        self.state.pop();
+                        // Index-inherit operator: obj[index] += { ... }
+                        // Emit INDEX_INHERIT_READ to read index and push proto value
+                        self.push_code(Opcode::INDEX_INHERIT_READ.into(), self.index);
+                        self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                        self.state.push(State::EndIndexInherit);
+                        self.state.push(State::BeginStmt{last_was_sep:false});
+                        return 1
+                    }
                     self.push_code(Opcode::BEGIN_BARE.into(), self.index);
                     self.state.push(State::EndBare);
                     self.state.push(State::BeginStmt{last_was_sep:false});
@@ -1374,6 +1470,12 @@ impl ScriptParser{
                     self.state.push(State::BeginExpr{required:true});
                     return 1
                 }
+                if op == id!(..){
+                    // Prefix .. is the splat operator
+                    self.state.push(State::EmitSplat{index:self.index});
+                    self.state.push(State::BeginExpr{required:true});
+                    return 1
+                }
                 if !required && (sep == id!(;) || sep == id!(,)){
                    // self.push_code(NIL, self.index);
                 }
@@ -1416,8 +1518,41 @@ impl ScriptParser{
                     if let Some(last) = self.state.pop(){
                         if let State::EmitOp{what_op:id!(.)|id!(.?),..} = last{
                             if State::is_assign_operator(op){
+                                // For : operator with field chain like field.sub: value
+                                // transform to me.field.sub = value
+                                if op == id!(:) {
+                                    // Find the start of the field chain by walking backwards
+                                    // The chain structure is: [id, id, (FIELD, id)*]
+                                    // e.g. field.sub -> [id(field), id(sub)]
+                                    // e.g. field.sub.sub2 -> [id(field), id(sub), FIELD, id(sub2)]
+                                    let mut chain_start = self.opcodes.len();
+                                    
+                                    // Walk backwards through ids and FIELDs
+                                    while chain_start > 0 {
+                                        let prev = chain_start - 1;
+                                        if self.opcodes[prev].is_id() || self.opcodes[prev] == Opcode::FIELD.into() {
+                                            chain_start = prev;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Now insert ME at chain_start
+                                    self.opcodes.insert(chain_start, Opcode::ME.into());
+                                    self.source_map.insert(chain_start, Some(self.index));
+                                    
+                                    // Insert PROTO_FIELD after the first id (which is now at chain_start + 1)
+                                    // The first id is at chain_start + 1, so PROTO_FIELD goes at chain_start + 2
+                                    self.opcodes.insert(chain_start + 2, Opcode::PROTO_FIELD.into());
+                                    self.source_map.insert(chain_start + 2, Some(self.index));
+                                }
+                                
+                                // Patch remaining FIELD to PROTO_FIELD
                                 for pair in self.opcodes.rchunks_mut(2){
-                                    if pair[0] == Opcode::FIELD.into() && pair[1].is_id(){
+                                    if pair[0].is_id() && pair[1] == Opcode::FIELD.into(){
+                                        pair[1] = Opcode::PROTO_FIELD.into()
+                                    }
+                                    else if pair[1].is_id() && pair[0] == Opcode::FIELD.into(){
                                         pair[0] = Opcode::PROTO_FIELD.into()
                                     }
                                     else{
@@ -1497,6 +1632,42 @@ impl ScriptParser{
                         }
                         else if let State::EmitOp{what_op:id!(.?),index} = last{
                             self.push_code(State::operator_to_opcode(id!(.?)), index);
+                        }
+                        else if let State::EmitOp{what_op:id!(+:),..} = last{
+                            // Proto-inherit operator: field +: Proto { ... }
+                            // Emit PROTO_INHERIT_READ to read field and push proto value
+                            self.push_code(Opcode::PROTO_INHERIT_READ.into(), self.index);
+                            self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                            self.state.push(State::EndProtoInherit);
+                            self.state.push(State::BeginStmt{last_was_sep:false});
+                            return 1
+                        }
+                        else if let State::EmitOp{what_op:id!(+=),..} = last{
+                            // Scope-inherit operator: value += Proto { ... }
+                            // Emit SCOPE_INHERIT_READ to read variable and push proto value
+                            self.push_code(Opcode::SCOPE_INHERIT_READ.into(), self.index);
+                            self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                            self.state.push(State::EndScopeInherit);
+                            self.state.push(State::BeginStmt{last_was_sep:false});
+                            return 1
+                        }
+                        else if let State::EmitFieldAssign{what_op:id!(+=),..} = last{
+                            // Field-inherit operator: obj.field += Proto { ... }
+                            // Emit FIELD_INHERIT_READ to read field and push proto value
+                            self.push_code(Opcode::FIELD_INHERIT_READ.into(), self.index);
+                            self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                            self.state.push(State::EndFieldInherit);
+                            self.state.push(State::BeginStmt{last_was_sep:false});
+                            return 1
+                        }
+                        else if let State::EmitIndexAssign{what_op:id!(+=),..} = last{
+                            // Index-inherit operator: obj[index] += Proto { ... }
+                            // Emit INDEX_INHERIT_READ to read index and push proto value
+                            self.push_code(Opcode::INDEX_INHERIT_READ.into(), self.index);
+                            self.push_code(Opcode::BEGIN_PROTO.into(), self.index);
+                            self.state.push(State::EndIndexInherit);
+                            self.state.push(State::BeginStmt{last_was_sep:false});
+                            return 1
                         }
                         else{
                             self.state.push(last);
@@ -1589,6 +1760,11 @@ impl ScriptParser{
                         }
                         if opcode == Opcode::BREAK || opcode == Opcode::CONTINUE{
                             //code.set_opcode_is_statement();
+                            self.state.push(State::BeginStmt{last_was_sep:false});
+                            return 0;
+                        }
+                        if opcode == Opcode::ME_SPLAT{
+                            // ME_SPLAT already handles merging into me, no pop_to_me needed
                             self.state.push(State::BeginStmt{last_was_sep:false});
                             return 0;
                         }

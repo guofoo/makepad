@@ -1,12 +1,14 @@
-
+use crate::apply::*;
 use crate::vm::*;
 use crate::value::*;
 use crate::heap::*;
 use crate::traits::*;
 use crate::object::*;
+use crate::handle::*;
 use makepad_live_id::*;
 use crate::function::*;
 use crate::pod::*;
+use crate::*;
 
 #[macro_export]
 macro_rules!script_primitive {
@@ -31,9 +33,21 @@ macro_rules!script_primitive {
 script_primitive!(
     f32, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value) as _;
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v as _;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1.0} else {0.0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self as _)}
 ); 
@@ -41,9 +55,21 @@ script_primitive!(
 script_primitive!(
     f64, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value);
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1.0} else {0.0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self)}
 );
@@ -51,9 +77,21 @@ script_primitive!(
 script_primitive!(
     u64, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value) as u64;
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v as u64;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1} else {0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self as f64)}
 );
@@ -61,9 +99,21 @@ script_primitive!(
 script_primitive!(
     usize, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value) as usize;
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v as usize;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1} else {0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self as f64)}
 );
@@ -72,7 +122,7 @@ script_primitive!(
     ScriptObjectRef, 
     fn script_new(vm:&mut ScriptVm)->Self{vm.heap.new_object_ref(ScriptObject::ZERO)},
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_object()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         if let Some(obj) = value.as_object(){
             *self = vm.heap.new_object_ref(obj)
         }
@@ -94,7 +144,7 @@ script_primitive!(
             false
         }
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         if let Some(obj) = value.as_object(){
             if vm.heap.is_fn(obj){
                 *self = vm.heap.new_fn_ref(obj)
@@ -106,13 +156,40 @@ script_primitive!(
     }
 );
 
+script_primitive!(
+    ScriptHandleRef, 
+    fn script_new(vm:&mut ScriptVm)->Self{vm.heap.new_handle_ref(ScriptHandle::ZERO)},
+    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.as_handle().is_some()
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
+        if let Some(handle) = value.as_handle(){
+            *self = vm.heap.new_handle_ref(handle)
+        }
+    },
+    fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{
+        self.as_handle().into()
+    }
+);
 
 script_primitive!(
     u32, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value) as u32;
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v as u32;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1} else {0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self as f64)}
 );
@@ -120,9 +197,21 @@ script_primitive!(
 script_primitive!(
     u16, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
-    fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_number()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        *self = vm.cast_to_f64(value) as u16;
+    fn script_type_check(heap:&ScriptHeap, value:ScriptValue)->bool{
+        value.is_number() || value.is_bool() || heap.has_apply_transform(value)
+    },
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+            *self = v as u16;
+            return;
+        }
+        if let Some(v) = value.as_bool(){
+            *self = if v {1} else {0};
+            return;
+        }
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_f64(*self as f64)}
 );
@@ -132,7 +221,7 @@ script_primitive!(
     bool, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_bool()},
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         *self = vm.heap.cast_to_bool(value);
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{ScriptValue::from_bool(*self)}
@@ -144,7 +233,7 @@ script_primitive!(
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{
         value.is_string_like()
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         self.clear();
         vm.heap.cast_to_string(value,self);
     },
@@ -159,13 +248,14 @@ script_primitive!(
 );
 impl ScriptDeriveMarker for String{}
 
+
 script_primitive!(
     &'static str, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{
         value.is_string_like()
     },
-    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&mut ApplyScope, _value:ScriptValue){
+    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, _value:ScriptValue){
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
         if let Some(val) = ScriptValue::from_inline_string(&self){
@@ -182,36 +272,109 @@ script_primitive!(
     LiveId, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_id()},
-    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         if let Some(id) = value.as_id(){
             *self = id
         }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{self.into()}
 );
+impl ScriptDeriveMarker for LiveId{}
 
 script_primitive!(
     ScriptObject, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
     fn script_type_check(_heap:&ScriptHeap, value:ScriptValue)->bool{value.is_object()},
-    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         if let Some(object) = value.as_object(){
             *self = object
         }
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{(*self).into()}
 );
-
+//impl ScriptDeriveMarker for ScriptObject{}
 
 script_primitive!(
     ScriptValue, 
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()},
     fn script_type_check(_heap:&ScriptHeap, _value:ScriptValue)->bool{true},
-    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, _vm:&mut ScriptVm, _apply:&Apply, _scope:&mut Scope, value:ScriptValue){
         *self = value
     },
     fn script_to_value(&self, _vm:&mut ScriptVm)->ScriptValue{*self}
 );
+//impl ScriptDeriveMarker for ScriptValue{}
+
+// LiveIdMap<K, V> implementation
+impl<K, V> ScriptHook for LiveIdMap<K, V> 
+    where K: ScriptApply + ScriptNew + 'static + std::cmp::Eq + std::hash::Hash + Copy + From<LiveId> + std::fmt::Debug,
+          V: ScriptApply + ScriptNew + 'static {}
+
+impl<K, V> ScriptNew for LiveIdMap<K, V>  
+    where K: ScriptApply + ScriptNew + 'static + std::cmp::Eq + std::hash::Hash + Copy + From<LiveId> + std::fmt::Debug,
+          V: ScriptApply + ScriptNew + 'static {
+    fn script_type_id_static() -> ScriptTypeId { ScriptTypeId::of::<Self>() }
+    fn script_type_check(heap: &ScriptHeap, value: ScriptValue) -> bool {
+        if let Some(obj) = value.as_object() {
+            let map = heap.map_ref(obj);
+            for (key, value) in map.iter() {
+                if !K::script_type_check(heap, *key) {
+                    return false
+                }
+                if !V::script_type_check(heap, value.value) {
+                    return false
+                }
+            }
+            return true
+        }
+        value.is_nil() || heap.has_apply_transform(value)
+    }
+    fn script_default(_vm: &mut ScriptVm) -> ScriptValue { NIL }
+    fn script_new(_vm: &mut ScriptVm) -> Self { Default::default() }
+    fn script_proto_build(_vm: &mut ScriptVm, _props: &mut ScriptTypeProps) -> ScriptValue { NIL }
+}
+
+impl<K, V> ScriptApply for LiveIdMap<K, V>  
+    where K: ScriptApply + ScriptNew + 'static + std::cmp::Eq + std::hash::Hash + Copy + From<LiveId> + std::fmt::Debug,
+          V: ScriptApply + ScriptNew + 'static {
+    fn script_type_id(&self) -> ScriptTypeId { ScriptTypeId::of::<Self>() }
+    fn script_apply(&mut self, vm: &mut ScriptVm, apply: &Apply, scope: &mut Scope, value: ScriptValue) {
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
+        if let Some(obj) = value.as_object() {
+            self.clear();
+            vm.map_mut_with(obj, |vm, obj_map| {
+                for (key, value) in obj_map.iter_mut() {
+                    let key = K::script_from_value(vm, *key);
+                    let value = V::script_from_value(vm, value.value);
+                    self.insert(key, value);
+                }
+            })
+        }
+        else if value.is_nil() {
+            self.clear()
+        }
+        else {
+            script_err_type_mismatch!(vm.thread.trap, "wrong type in apply");
+        }
+    }
+    fn script_to_value(&self, vm: &mut ScriptVm) -> ScriptValue {
+        let obj = vm.heap.new_object();
+        vm.map_mut_with(obj, |vm, obj_map| {
+            for (key, value) in self.iter() {
+                let key = key.script_to_value(vm);
+                let value = value.script_to_value(vm);
+                obj_map.insert(key, ScriptMapValue {
+                    tag: Default::default(),
+                    value
+                });
+            }
+        });
+        obj.into()
+    } 
+}
 
 
 script_primitive!(
@@ -226,10 +389,10 @@ script_primitive!(
                  return v.dims() == 2
             }
         }
-        false
+        heap.has_apply_transform(value)
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        if let Some(v) = value.as_f64(){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
              self.x = v;
              self.y = v;
              return
@@ -266,10 +429,9 @@ script_primitive!(
                  }
              }
         }
-        let val = vm.cast_to_f64(value);
-        if !val.is_nan(){
-            self.x = val;
-            self.y = val;
+        // Try apply transform at the bottom
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
         }
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -293,12 +455,12 @@ script_primitive!(
                  return v.dims() == 2
             }
         }
-        false
+        heap.has_apply_transform(value)
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        if let Some(v) = value.as_f32(){
-             self.x = v;
-             self.y = v;
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+             self.x = v as f32;
+             self.y = v as f32;
              return
         }
         if let Some(pod) = value.as_pod(){
@@ -333,10 +495,9 @@ script_primitive!(
                  }
              }
         }
-        let val = vm.cast_to_f64(value) as f32;
-        if !val.is_nan(){
-            self.x = val;
-            self.y = val;
+        // Try apply transform at the bottom
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
         }
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -361,13 +522,13 @@ script_primitive!(
                  return v.dims() == 3
             }
         }
-        false
+        heap.has_apply_transform(value)
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        if let Some(v) = value.as_f32(){
-             self.x = v;
-             self.y = v;
-             self.z = v;
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+             self.x = v as f32;
+             self.y = v as f32;
+             self.z = v as f32;
              return
         }
         if let Some(c) = value.as_color(){
@@ -414,11 +575,9 @@ script_primitive!(
                  }
              }
         }
-        let val = vm.cast_to_f64(value) as f32;
-        if !val.is_nan(){
-            self.x = val;
-            self.y = val;
-            self.z = val;
+        // Try apply transform at the bottom
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
         }
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -444,14 +603,14 @@ script_primitive!(
                  return v.dims() == 4
             }
         }
-        false
+        heap.has_apply_transform(value)
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        if let Some(v) = value.as_f32(){
-             self.x = v;
-             self.y = v;
-             self.z = v;
-             self.w = v;
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
+             self.x = v as f32;
+             self.y = v as f32;
+             self.z = v as f32;
+             self.w = v as f32;
              return
         }
         if let Some(c) = value.as_color(){
@@ -501,12 +660,9 @@ script_primitive!(
                  }
              }
         }
-        let val = vm.cast_to_f64(value) as f32;
-        if !val.is_nan(){
-            self.x = val;
-            self.y = val;
-            self.z = val;
-            self.w = val;
+        // Try apply transform at the bottom
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
         }
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -532,12 +688,12 @@ script_primitive!(
                  return m.dims() == (4, 4)
             }
         }
-        false
+        heap.has_apply_transform(value)
     },
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        if let Some(v) = value.as_f32(){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        if let Some(v) = value.as_number(){
              for i in 0..16 {
-                 self.v[i] = v;
+                 self.v[i] = v as f32;
              }
              return
         }
@@ -558,11 +714,9 @@ script_primitive!(
                  }
              }
         }
-        let val = vm.cast_to_f64(value) as f32;
-        if !val.is_nan(){
-            for i in 0..16 {
-                self.v[i] = val;
-            }
+        // Try apply transform at the bottom
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
         }
     },
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -591,19 +745,19 @@ impl<T> ScriptNew for  Option<T> where T: ScriptApply + ScriptNew + 'static{
 }
 impl<T> ScriptApply for Option<T> where T: ScriptApply + ScriptNew  + 'static{
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
         if let Some(v) = self{
             if value.is_nil(){
                 *self = None
             }
             else{
-                v.script_apply(vm, apply, value);
+                v.script_apply(vm, apply, scope, value);
             }
         }
         else{
             if !value.is_nil(){
                 let mut inner = T::script_new(vm);
-                inner.script_apply(vm, apply, value);
+                inner.script_apply(vm, apply, scope, value);
                 *self = Some(inner);
             }
         }

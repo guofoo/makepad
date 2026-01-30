@@ -141,7 +141,7 @@ fn apply_fade_out(buf: &mut [f32], fade_samples: usize) {
 
 app_main!(App);
 
-script_run!{
+script_mod!{
     use mod.std.*;
     #(App::script_api(vm)){
     }
@@ -149,16 +149,16 @@ script_run!{
 
 impl App {
     fn run(vm: &mut ScriptVm) -> Self {
-        crate::makepad_draw2::script_run(vm);
-        App::script_run(vm, script_run)
+        crate::makepad_draw2::script_mod(vm);
+        App::from_script_mod(vm, script_mod)
     }
 }
 
 #[derive(Script, ScriptHook)]
 pub struct App {
-    #[script] window: WindowHandle,
-    #[script] pass: Pass,
-    #[script] main_draw_list: DrawList2d,
+    #[new] window: WindowHandle,
+    #[new] pass: DrawPass,
+    #[new] main_draw_list: DrawList2d,
 }
 
 // this is the protocol enum with 'micro-serde' binary serialise/deserialise macro on it.

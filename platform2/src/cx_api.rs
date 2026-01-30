@@ -11,6 +11,7 @@ use {
         macos_menu::MacosMenu,
         makepad_futures::executor::Spawner,
         makepad_live_id::*,
+        makepad_script::value::ScriptHandle,
         event::xr::XrAnchor,
         makepad_math::{Vec2d, Rect},
         draw_pass::{CxDrawPassParent, CxDrawPassRect, DrawPassId},
@@ -237,6 +238,12 @@ impl Cx {
         }
         Err(format!("Dependency not loaded {}", path))
     }
+    
+    /// Get loaded resource data by ScriptHandle
+    pub fn get_resource(&self, handle: ScriptHandle) -> Option<Rc<Vec<u8>>> {
+        self.script_data.resources.get_data(handle)
+    }
+    
     pub fn null_texture(&self) -> Texture {
         self.null_texture.clone()
     }
@@ -824,7 +831,7 @@ impl Cx {
 
 #[macro_export]
 macro_rules! register_component_factory {
-    ( $ cx: ident, $ registry: ident, $ ty: ty, $ factory: ident) => {
+    ( $ cx: expr, $ registry: ident, $ ty: ty, $ factory: ident) => {
         let module_id = LiveModuleId::from_str(&module_path!()).unwrap();
         if let Some((reg, _)) = $cx
             .live_registry

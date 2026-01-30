@@ -3,6 +3,7 @@ use crate::heap::*;
 use crate::array::*;
 use crate::object::*;
 use crate::function::*;
+use crate::handle::*;
 
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
@@ -44,14 +45,14 @@ impl ScriptHeap{
             Entry::Occupied(mut occ) => {
                 *occ.get_mut() += 1;
                 ScriptObjectRef{
-                    roots: self.root_objects.clone(),
+                    roots: Some(self.root_objects.clone()),
                     obj: obj
                 }
             }
             Entry::Vacant(vac) => {
                 vac.insert(1);
                 ScriptObjectRef{
-                    roots: self.root_objects.clone(),
+                    roots: Some(self.root_objects.clone()),
                     obj: obj
                 }
             }
@@ -80,6 +81,26 @@ impl ScriptHeap{
     
     pub fn new_fn_ref(&mut self, obj:ScriptObject)->ScriptFnRef{
         ScriptFnRef(self.new_object_ref(obj))
+    }
+    
+    pub fn new_handle_ref(&mut self, handle:ScriptHandle)->ScriptHandleRef{
+        let mut roots = self.root_handles.borrow_mut();
+        match roots.entry(handle) {
+            Entry::Occupied(mut occ) => {
+                *occ.get_mut() += 1;
+                ScriptHandleRef{
+                    roots: self.root_handles.clone(),
+                    handle: handle
+                }
+            }
+            Entry::Vacant(vac) => {
+                vac.insert(1);
+                ScriptHandleRef{
+                    roots: self.root_handles.clone(),
+                    handle: handle
+                }
+            }
+        }
     }
         
     pub fn mark_inner(&mut self, value:ScriptGcMark){
@@ -127,6 +148,10 @@ impl ScriptHeap{
                 }
             }                
         }
+        // Mark type_defaults objects
+        for obj in self.type_defaults.values(){
+            self.mark_vec.push(ScriptGcMark::Object(*obj));
+        }
         let roots = self.root_objects.borrow();
         for item in roots.keys(){
             self.mark_vec.push(ScriptGcMark::Object(*item));
@@ -135,6 +160,11 @@ impl ScriptHeap{
         let roots = self.root_arrays.borrow();
         for item in roots.keys(){
             self.mark_vec.push(ScriptGcMark::Array(*item));
+        }
+        drop(roots);
+        let roots = self.root_handles.borrow();
+        for item in roots.keys(){
+            self.handles[item.index as usize].as_mut().unwrap().tag.set_mark();
         }
         drop(roots);
         for i in 0..stack.len(){

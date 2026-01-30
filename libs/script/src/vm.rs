@@ -10,8 +10,11 @@ use crate::mod_math::*;
 use crate::mod_pod::*;
 use crate::mod_shader::*;
 use crate::object::*;
+use crate::function::*;
+use crate::trap::*;
 use std::cell::RefCell;
 use std::any::Any;
+use std::collections::HashMap;
 
 #[derive(Default, Debug)]
 pub struct ScriptMod{
@@ -47,7 +50,7 @@ pub struct ScriptBuiltins{
 impl ScriptBuiltins{
     pub fn new(heap:&mut ScriptHeap, pod: ScriptPodBuiltins)->Self{
         Self{
-            range: heap.value_path(heap.modules, ids!(std.Range),&mut Default::default()).as_object().unwrap(),
+            range: heap.value_path(heap.modules, ids!(std.Range),NoTrap).as_object().unwrap(),
             pod,
         }
     }
@@ -57,6 +60,7 @@ pub struct ScriptCode{
     pub builtins: ScriptBuiltins,
     pub native: RefCell<ScriptNative>,
     pub bodies: RefCell<Vec<ScriptBody>>,
+    pub crate_manifests: RefCell<HashMap<String, String>>,
 }
 
 pub struct ScriptLoc{
@@ -124,6 +128,47 @@ impl <'a> ScriptVm<'a>{
     
     pub fn call(&mut self,fnobj:ScriptValue, args:&[ScriptValue])->ScriptValue{
         self.thread.call(self.heap, self.code, self.host, fnobj, args)
+    }
+    
+    /// Checks if the value has an apply transform and calls it, returning the transformed value.
+    /// Returns None if no transform exists, Some(transformed) if a transform was applied.
+    pub fn call_apply_transform(&mut self, value: ScriptValue) -> Option<ScriptValue> {
+        if let Some(obj) = value.as_object() {
+            if let Some(ni) = self.heap.objects[obj.index as usize].tag.as_apply_transform() {
+                let native = self.code.native.borrow();
+                let result = (*native.functions[ni.index as usize])(
+                    &mut ScriptVm {
+                        host: self.host,
+                        heap: self.heap,
+                        thread: self.thread,
+                        code: self.code
+                    },
+                    obj
+                );
+                drop(native);
+                return Some(result);
+            }
+        }
+        else if let Some(arr) = value.as_array() {
+            if let Some(ni) = self.heap.arrays[arr.index as usize].tag.as_apply_transform() {
+                // For arrays, we need to create a temporary args object
+                let args_obj = self.heap.new_object();
+                self.heap.set_value_def(args_obj, id!(self).into(), value);
+                let native = self.code.native.borrow();
+                let result = (*native.functions[ni.index as usize])(
+                    &mut ScriptVm {
+                        host: self.host,
+                        heap: self.heap,
+                        thread: self.thread,
+                        code: self.code
+                    },
+                    args_obj
+                );
+                drop(native);
+                return Some(result);
+            }
+        }
+        None
     }
     
     pub fn resume(&mut self)->ScriptValue{
@@ -194,8 +239,24 @@ impl <'a> ScriptVm<'a>{
         self.code.native.borrow_mut().add_method(&mut self.heap, module, method, args, f)
     }
     
+    /// Registers a native function to be used as an apply_transform and returns its NativeId.
+    /// This is used for creating objects that transform to a computed value when applied.
+    pub fn add_apply_transform_fn<F>(&mut self, f: F) -> NativeId
+    where F: Fn(&mut ScriptVm, ScriptObject)->ScriptValue + 'static{
+        self.code.native.borrow_mut().add_apply_transform_fn(f)
+    }
+    
     
     pub fn add_script_mod(&mut self, new_mod:ScriptMod)->u16{
+        // Register this crate's manifest path for crate path resolution
+        let crate_name = new_mod.module_path.split("::").next().unwrap_or("");
+        if !crate_name.is_empty() {
+            self.code.crate_manifests.borrow_mut().insert(
+                crate_name.replace('-', "_"),
+                new_mod.cargo_manifest_path.clone()
+            );
+        }
+        
         let scope = self.heap.new_with_proto(id!(scope).into());
         self.heap.set_object_deep(scope);
         self.heap.set_value_def(scope, id!(mod).into(), self.heap.modules.into());
@@ -310,6 +371,7 @@ impl ScriptVmBase{
                 builtins,
                 native: RefCell::new(native),
                 bodies: Default::default(),
+                crate_manifests: Default::default(),
             },
             threads: vec![ScriptThread::new(ScriptThreadId(0))],
             heap: heap,

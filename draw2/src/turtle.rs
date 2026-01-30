@@ -5,6 +5,28 @@ use {
     }
 };
 
+script_mod!{
+    mod.turtle = {
+        Base: #(Base::script_api(vm))
+        FitBound: #(FitBound::script_api(vm))
+        Size: #(Size::script_api(vm)),
+        ..me.Size,
+        Metrics: #(Metrics::script_api(vm))
+        RowAlign: #(RowAlign::script_api(vm))
+        Base: #(Base::script_api(vm))
+        Flow: #(Flow::script_api(vm)),
+        ..me.Flow,
+        Align: #(Align::script_api(vm))
+        Inset: #(Inset::script_api(vm))
+        Layout: #(Layout::script_api(vm))
+        Walk: #(Walk::script_api(vm)),
+        
+        Center: me.Align{x:0.5, y:0.5}
+        HCenter: me.Align{x:0.5, y:0.}
+        VCenter: me.Align{x:0., y:0.5}
+    }
+}
+
 #[derive(Clone, Debug)]
 struct DeferredFill {
     weight: f64,
@@ -31,7 +53,7 @@ pub struct Walk {
 
     /// The margin around this walk's rectangle.
     #[live]
-    pub margin: Margin,
+    pub margin: Inset,
 
     /// The desired width of this walk's rectangle.
     #[live]
@@ -50,7 +72,7 @@ impl Walk {
     pub fn new(width: Size, height: Size) -> Self {
         Self {
             abs_pos: None,
-            margin: Margin::default(),
+            margin: Inset::default(),
             width,
             height,
             metrics: Metrics::default(),
@@ -66,7 +88,7 @@ impl Walk {
     pub fn fill() -> Self {
         Self {
             abs_pos: None,
-            margin: Margin::default(),
+            margin: Inset::default(),
             width: Size::fill(),
             height: Size::fill(),
             metrics: Metrics::default(),
@@ -77,7 +99,7 @@ impl Walk {
     pub fn fixed(width: f64, height: f64) -> Self {
         Self {
             abs_pos: None,
-            margin: Margin::default(),
+            margin: Inset::default(),
             width: Size::Fixed(width),
             height: Size::Fixed(height),
             metrics: Metrics::default(),
@@ -88,7 +110,7 @@ impl Walk {
     pub fn fit() -> Self {
         Self {
             abs_pos: None,
-            margin: Margin::default(),
+            margin: Inset::default(),
             width: Size::fit(),
             height: Size::fit(),
             metrics: Metrics::default(),
@@ -100,7 +122,7 @@ impl Walk {
     pub fn fill_fit() -> Self {
         Self {
             abs_pos: None,
-            margin: Margin::default(),
+            margin: Inset::default(),
             width: Size::fill(),
             height: Size::fit(),
             metrics: Metrics::default(),
@@ -108,7 +130,7 @@ impl Walk {
     }
 
     /// Returns a copy of this `Walk` with `margin` set to the given value.
-    pub fn with_margin(self, margin: Margin) -> Self {
+    pub fn with_margin(self, margin: Inset) -> Self {
         Self {
             margin,
             ..self
@@ -181,7 +203,7 @@ impl Default for Metrics {
 /// 
 /// See `Turtle::next_walk_width` and `Turtle::next_walk_height` for details on how the actual
 /// width/height is computed based on the desired width/height.
-#[derive(Copy, Clone, Debug, Script, ScriptHook)]
+#[derive(Copy, Clone, Debug, Script)]
 pub enum Size {
     #[pick {
         weight: 100.0,
@@ -263,6 +285,26 @@ impl Default for Size {
     }
 }
 
+impl ScriptHook for Size {
+    fn on_type_check(_heap: &ScriptHeap, value: ScriptValue) -> bool {
+        value.as_f64().is_some() || value.as_number().is_some()
+    }
+    
+    fn on_custom_apply(&mut self, _vm: &mut ScriptVm, _apply: &Apply, _scope: &mut Scope, value: ScriptValue) -> bool {
+        // Handle numeric values as Size::Fixed
+        if let Some(v) = value.as_f64() {
+            *self = Size::Fixed(v);
+            return true;
+        }
+        if let Some(v) = value.as_number() {
+            *self = Size::Fixed(v);
+            return true;
+        }
+        // Return false to let the generated code handle normal enum objects
+        false
+    }
+}
+
 #[derive(Clone, Copy, Debug, Script, ScriptHook)]
 pub enum FitBound {
     #[pick(100.0)]
@@ -306,7 +348,7 @@ impl FitBound {
 }
 /*
 impl LiveHook for FitBound {
-    fn skip_apply(&mut self, _cx: &mut Cx, _apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
+    fn skip_apply(&mut self, _cx: &mut Cx, _apply: &Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
         match nodes[index].value {
             LiveValue::Int64(value) => {
                 *self = Self::Abs(value as f64);
@@ -348,7 +390,7 @@ pub struct Layout {
 
     /// The padding around the inner rectangle of each walk.
     #[live]
-    pub padding: Padding,
+    pub padding: Inset,
 
     /// The alignment of each walk with respect to their turtle's rectangle.
     #[live]
@@ -393,7 +435,7 @@ impl Layout {
     }
 
     /// Creates a copy of this `Layout` with `padding` set to the given value.
-    pub fn with_padding(self, padding: Padding) -> Self {
+    pub fn with_padding(self, padding: Inset) -> Self {
         Self {
             padding,
             ..self
@@ -439,7 +481,7 @@ impl Default for Layout {
             scroll: dvec2(0.0,0.0),
             clip_x: true,
             clip_y: true,
-            padding: Padding::default(),
+            padding: Inset::default(),
             align: Align::default(),
             flow: Flow::default(),
             spacing: 0.0,
@@ -508,89 +550,6 @@ pub enum RowAlign {
     Bottom,
 }
 
-/// Specifies the padding around a walk's inner rectangle.
-#[derive(Clone, Copy, Default, Debug, Script, ScriptHook)]
-pub struct Padding {
-    /// The left padding.
-    #[live]
-    pub left: f64,
-
-    /// The top padding.
-    #[live]
-    pub top: f64,
-
-    /// The right padding.
-    #[live]
-    pub right: f64,
-
-    /// The bottom padding.
-    #[live]
-    pub bottom: f64
-}
-
-impl Padding {
-    /// Returns a copy of this `Padding` with the left padding set to the given value.
-    pub fn with_left(self, left: f64) -> Self {
-        Self {
-            left,
-            ..self
-        }
-    }
-
-    /// Returns a copy of this `Padding` with the top padding set to the given value.
-    pub fn with_top(self, top: f64) -> Self {
-        Self {
-            top,
-            ..self
-        }
-    }
-
-    /// Returns a copy of this `Padding` with the right padding set to the given value.
-    pub fn with_right(self, right: f64) -> Self {
-        Self {
-            right,
-            ..self
-        }
-    }
-
-    /// Returns a copy of this `Padding` with the bottom padding set to the given value.
-    pub fn with_bottom(self, bottom: f64) -> Self {
-        Self {
-            bottom,
-            ..self
-        }
-    }
-
-    /// Returns a vector containing the left and top padding.
-    pub fn left_top(self) -> Vec2d {
-        dvec2(self.left, self.top)
-    }
-
-    /// Returns a vector containing the right and bottom padding.
-    pub fn right_bottom(self) -> Vec2d {
-        dvec2(self.right, self.bottom)
-    }
-
-    /// Returns a vector containing both the padding width and height.
-    pub fn size(self) -> Vec2d {
-        dvec2(self.width(), self.height())
-    }
-
-    /// Returns the horizontal padding.
-    /// 
-    /// This is the sum of the left and right padding.
-    pub fn width(self) -> f64 {
-        self.left + self.right
-    }
-
-    /// Returns the vertical padding.
-    /// 
-    /// This is the sum of the top and bottom padding.
-    pub fn height(self) -> f64 {
-        self.top + self.bottom
-    }
-}
-
 /// The turtle is the main layout primitive in Makepad.
 /// 
 /// A turtle can be walked to allocate space on the screen. Each walk produces a rectangle that
@@ -601,9 +560,9 @@ impl Padding {
 /// is finished, the parent turtle finishes its walk.
 /// 
 /// +-----------------+
-/// |     Margin      |
+/// | Padding Inset   |
 /// | +-------------+ |
-/// | |   Padding   | |
+/// | | Margin Inset| |
 /// | | +---------+ | |
 /// | | | Content | | |
 /// | | +---------+ | |
@@ -646,7 +605,7 @@ impl Turtle {
     }
 
     /// Return the margin around this turtle's rectangle.
-    pub fn margin(&self) -> Margin {
+    pub fn margin(&self) -> Inset {
         self.walk.margin
     }
 
@@ -661,7 +620,7 @@ impl Turtle {
     }
 
     /// Returns the padding around the inner rectangle of each walk of this turtle.
-    pub fn padding(&self) -> Padding {
+    pub fn padding(&self) -> Inset {
         self.layout.padding
     }
 
@@ -996,7 +955,7 @@ impl Turtle {
 
     /// Returns the size of the rectangle of this turtle's next walk, based on the given desired
     /// `width`, `height`, and `margin`.
-    pub fn next_walk_size(&self, width: Size, height: Size, margin: Margin) -> Vec2d {
+    pub fn next_walk_size(&self, width: Size, height: Size, margin: Inset) -> Vec2d {
         dvec2(
             self.next_walk_width(width, margin),
             self.next_walk_height(height, margin),
@@ -1028,7 +987,7 @@ impl Turtle {
     /// - If the desired width is `Size::Fit`, then the actual width cannot be computed until this
     ///   turtle's final unused inner width is known, so we return NaN to indicate that the actual
     ///   width is not yet known.
-    pub fn next_walk_width(&self, width: Size, margin: Margin) -> f64 {
+    pub fn next_walk_width(&self, width: Size, margin: Inset) -> f64 {
         match width {
             Size::Fill { min, max, .. } => {
                 let mut outer_width = match self.layout.flow {
@@ -1072,7 +1031,7 @@ impl Turtle {
     /// - If the desired height is `Size::Fit`, then the actual height cannot be computed until this
     ///   turtle's final unused inner height is known, so we return NaN to indicate that the actual
     ///   height is not yet known.
-    pub fn next_walk_height(&self, height: Size, margin: Margin) -> f64 {
+    pub fn next_walk_height(&self, height: Size, margin: Inset) -> f64 {
         match height {
             Size::Fill { min, max, .. } => {
                 let mut outer_height = match self.layout.flow {
@@ -1202,7 +1161,7 @@ pub enum DeferredWalk {
     Unresolved {
         index: usize,
         pos: Vec2d,
-        margin: Margin,
+        margin: Inset,
         other_axis: Size,
     },
     /// A resolved deferred walk.
@@ -2252,7 +2211,7 @@ impl Walk {
     pub fn abs_rect(rect:Rect) -> Self {
         Self {
             abs_pos: Some(rect.pos),
-            margin: Margin::default(),
+            margin: Inset::default(),
             width: Size::Fixed(rect.size.x),
             height: Size::Fixed(rect.size.y),
             metrics: Metrics::default(),
@@ -2264,11 +2223,11 @@ impl Walk {
         self
     }
     pub fn with_margin_all(mut self, v: f64) -> Self {
-        self.margin = Margin {left: v, right: v, top: v, bottom: v};
+        self.margin = Inset {left: v, right: v, top: v, bottom: v};
         self
     }
     
-    pub fn with_add_padding(mut self, v: Padding) -> Self {
+    pub fn with_add_padding(mut self, v: Inset) -> Self {
         self.margin.top += v.top;
         self.margin.left += v.left;
         self.margin.right += v.right;
@@ -2300,13 +2259,13 @@ impl Layout {
     }
     
     pub fn with_padding_all(mut self, v: f64) -> Self {
-        self.padding = Padding {left: v, right: v, top: v, bottom: v};
+        self.padding = Inset {left: v, right: v, top: v, bottom: v};
         self
     }
 }
 /*
 impl LiveHook for Flow {
-    fn skip_apply(&mut self, _cx: &mut Cx, _apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
+    fn skip_apply(&mut self, _cx: &mut Cx, _apply: &Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
         match &nodes[index].value {
             LiveValue::BareEnum(live_id!(Right))=>{
                 *self = Self::right();
@@ -2321,20 +2280,8 @@ impl LiveHook for Flow {
     }
 }
 
-impl LiveHook for Padding {
-    fn skip_apply(&mut self, _cx: &mut Cx, _apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
-        if let Some(v) = nodes[index].value.as_float(){
-            *self = Self {left: v, top: v, right: v, bottom: v};
-            Some(index + 1)
-        }
-        else{
-            None
-        }
-    }
-}
-
 impl LiveHook for Size {
-    fn skip_apply(&mut self, cx: &mut Cx, _apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
+    fn skip_apply(&mut self, cx: &mut Cx, _apply: &Apply, index: usize, nodes: &[LiveNode]) -> Option<usize> {
         match &nodes[index].value {
             LiveValue::Array => {
                 fn last_keyframe_value_from_array(index: usize, nodes: &[LiveNode]) -> Option<usize> {

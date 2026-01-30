@@ -22,20 +22,37 @@ pub struct ScriptObjectTag(u64);
 pub type ScriptObjectMap = ValueMap<ScriptValue, ScriptMapValue>;
 
 pub struct ScriptObjectRef{
-    pub(crate) roots: Rc<RefCell<HashMap<ScriptObject, usize>>>,
+    pub(crate) roots: Option<Rc<RefCell<HashMap<ScriptObject, usize>>>>,
     pub(crate) obj: ScriptObject
+}
+
+impl ScriptObjectRef{
+    pub fn is_zero(&self)->bool{
+        self.obj == ScriptObject::ZERO
+    }
+}
+
+impl Default for ScriptObjectRef{
+    fn default()->Self{
+        Self{
+            roots: None,
+            obj: ScriptObject::ZERO
+        }
+    }
 }
 
 impl Clone for ScriptObjectRef{
     fn clone(&self)->Self{
-        let mut roots = self.roots.borrow_mut();
-        match roots.entry(self.obj) {
-            Entry::Occupied(mut occ) => {
-                let value = occ.get_mut();
-                * value += 1;
-            }
-            Entry::Vacant(_vac) => {
-                eprintln!("ScriptObjectRef root is vacant!");
+        if let Some(roots) = &self.roots{
+            let mut roots = roots.borrow_mut();
+            match roots.entry(self.obj) {
+                Entry::Occupied(mut occ) => {
+                    let value = occ.get_mut();
+                    * value += 1;
+                }
+                Entry::Vacant(_vac) => {
+                    eprintln!("ScriptObjectRef root is vacant!");
+                }
             }
         }
         Self{
@@ -66,22 +83,24 @@ impl ScriptRefOptionExt for Option<ScriptObjectRef>{
 
 impl Drop for ScriptObjectRef{
     fn drop(&mut self){
-        let mut roots = self.roots.borrow_mut();
-        match roots.entry(self.obj) {
-            Entry::Occupied(mut occ) => {
-                let value = occ.get_mut();
-                if *value >= 1{
-                    *value -= 1;
+        if let Some(roots) = &self.roots{
+            let mut roots = roots.borrow_mut();
+            match roots.entry(self.obj) {
+                Entry::Occupied(mut occ) => {
+                    let value = occ.get_mut();
+                    if *value >= 1{
+                        *value -= 1;
+                    }
+                    else{
+                        eprintln!("ScriptObjectRef is 0!");
+                    }
+                    if *value == 0{
+                        occ.remove();
+                    }
                 }
-                else{
-                    eprintln!("ScriptObjectRef is 0!");
+                Entry::Vacant(_vac) => {
+                    eprintln!("ScriptObjectRef root is vacant!");
                 }
-                if *value == 0{
-                    occ.remove();
-                }
-            }
-            Entry::Vacant(_vac) => {
-                eprintln!("ScriptObjectRef root is vacant!");
             }
         }
     }
@@ -137,6 +156,7 @@ impl ScriptObjectTag{
     pub const REF_KIND_TYPE_INDEX: u64 = 0x3<<58;
     pub const REF_KIND_POD_TYPE: u64 = 0x4<<58;
     pub const REF_KIND_SHADER_IO: u64 = 0x5<<58;
+    pub const REF_KIND_APPLY_TRANSFORM: u64 = 0x6<<58;
     pub const REF_KIND_MASK:  u64 = 0xF<<58;
     pub const REF_DATA_MASK: u64 = 0xFF_FFFF_FFFF;
     
@@ -256,7 +276,6 @@ impl ScriptObjectTag{
         self.0 & Self::MAP_ADD != 0
     }
         
-        
     pub fn set_reffed(&mut self){
         self.0 |= Self::REFFED
     }
@@ -332,7 +351,12 @@ impl ScriptObjectTag{
         self.0 &= !(Self::FREEZE_MASK);
         self.0 |= Self::FROZEN|Self::VALIDATED|Self::MAP_ADD|Self::VEC_FROZEN
     }
-        
+    
+    pub fn freeze_ext(&mut self){
+        self.0 &= !(Self::FREEZE_MASK);
+        self.0 |= Self::FROZEN|Self::VALIDATED|Self::MAP_ADD
+    }
+            
     pub fn needs_checking(&self)->bool{
         self.0 & (Self::NEED_CHECK_MASK) != 0
     }
@@ -364,6 +388,26 @@ impl ScriptObjectTag{
             
     pub fn is_type_index(&self)->bool{
         self.0 & Self::REF_KIND_MASK == Self::REF_KIND_TYPE_INDEX
+    }
+    
+        
+    pub fn set_apply_transform(&mut self, ni:NativeId){
+        self.0 &= !(Self::REF_DATA_MASK);
+        self.0 &= !(Self::REF_KIND_MASK);
+        self.0 |= ((ni.index as u64)) | Self::REF_KIND_APPLY_TRANSFORM; 
+    }
+        
+    pub fn as_apply_transform(&self)->Option<NativeId>{
+        if self.0 & Self::REF_KIND_MASK == Self::REF_KIND_APPLY_TRANSFORM{
+            Some(NativeId{index:self.0 as u32})
+        }
+        else{
+            None
+        }
+    }
+                
+    pub fn is_apply_transform(&self)->bool{
+        self.0 & Self::REF_KIND_MASK == Self::REF_KIND_APPLY_TRANSFORM
     }    
     
     pub fn set_fn(&mut self, ptr:ScriptFnPtr){
@@ -508,6 +552,11 @@ impl ScriptMapTag{
     fn set_order(&mut self, order: u32) {
         self.0 = (self.0 & !Self::ORDER_MASK) | (order as u64);
     }
+    
+    fn with_order_offset(self, offset: u32) -> Self {
+        let new_order = self.order() + offset;
+        Self((self.0 & !Self::ORDER_MASK) | (new_order as u64))
+    }
 }
 
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd)]
@@ -537,42 +586,49 @@ impl ScriptObjectData{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
                 return vm.heap.proto(sself)
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "proto called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(push), &[], |vm, args|{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
-                return vm.heap.vec_push_vec(sself, args, &mut vm.thread.trap);
+                return vm.heap.vec_push_vec(sself, args, vm.thread.trap.pass());
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "push called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(pop), &[], |vm, args|{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
-                return vm.heap.vec_pop(sself, &mut vm.thread.trap).value
+                return vm.heap.vec_pop(sself, vm.thread.trap.pass()).value
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "pop called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(len), &[], |vm, args|{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
                 return vm.heap.vec_len(sself).into()
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "len called on non-object value")
+        });
+        
+        native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(gc_id), &[], |vm, args|{
+            if let Some(sself) = script_value!(vm, args.self).as_object(){
+                return sself.index().into()
+            }
+            script_err_unexpected!(vm.thread.trap, "gc_id called on non-object value")
         });
                     
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(extend), &[], |vm, args|{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
-                return vm.heap.vec_push_vec_of_vec(sself, args, false, &mut vm.thread.trap);
+                return vm.heap.vec_push_vec_of_vec(sself, args, false, vm.thread.trap.pass());
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "extend called on non-object value")
         });
                     
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(import), &[], |vm, args|{
             if let Some(sself) = script_value!(vm, args.self).as_object(){
-                return vm.heap.vec_push_vec_of_vec(sself, args, true, &mut vm.thread.trap);
+                return vm.heap.vec_push_vec_of_vec(sself, args, true, vm.thread.trap.pass());
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "import called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(freeze), &[], |vm, args|{
@@ -580,7 +636,7 @@ impl ScriptObjectData{
                 vm.heap.freeze(sself);
                 return sself.into()
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "freeze called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(freeze_api), &[], |vm, args|{
@@ -588,7 +644,7 @@ impl ScriptObjectData{
                 vm.heap.freeze_api(sself);
                 return sself.into()
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "freeze_api called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(freeze_module), &[], |vm, args|{
@@ -596,7 +652,7 @@ impl ScriptObjectData{
                 vm.heap.freeze_module(sself);
                 return sself.into()
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "freeze_module called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(freeze_component), &[], |vm, args|{
@@ -604,7 +660,7 @@ impl ScriptObjectData{
                 vm.heap.freeze_component(sself);
                 return sself.into()
             }
-            vm.thread.trap.err_unexpected()
+            script_err_unexpected!(vm.thread.trap, "freeze_component called on non-object value")
         });
                 
         native.add_type_method(heap, ScriptValueType::REDUX_OBJECT, id!(retain), script_args!(cb=NIL), |vm, args|{
@@ -618,7 +674,7 @@ impl ScriptObjectData{
                         return ret;
                     }
                     if !vm.heap.cast_to_bool(ret){
-                        vm.heap.vec_remove(sself, i, &mut vm.thread.trap);
+                        vm.heap.vec_remove(sself, i, vm.thread.trap.pass());
                     }
                     else{
                         i += 1
@@ -626,7 +682,7 @@ impl ScriptObjectData{
                 }
                 return NIL
             }
-            vm.thread.trap.err_not_impl()
+            script_err_not_impl!(vm.thread.trap, "retain called on non-object value")
         });
     }     
     
@@ -739,7 +795,27 @@ impl ScriptObjectData{
     }
     
     pub fn merge_map_from_other(&mut self, other:&ScriptObjectData){
-        self.map.extend(other.map.iter());
+        let offset = self.map.len() as u32;
+        for (k, v) in other.map.iter() {
+            self.map.insert(*k, ScriptMapValue {
+                value: v.value,
+                tag: v.tag.with_order_offset(offset),
+            });
+        }
+    }
+    
+    /// Merge map entries from other, but only if the key doesn't already exist in self.
+    /// Used by the splat operator to not overwrite existing values.
+    pub fn merge_map_from_other_no_overwrite(&mut self, other:&ScriptObjectData){
+        let offset = self.map.len() as u32;
+        for (k, v) in other.map.iter() {
+            if !self.map.contains_key(k) {
+                self.map.insert(*k, ScriptMapValue {
+                    value: v.value,
+                    tag: v.tag.with_order_offset(offset),
+                });
+            }
+        }
     }
      
     pub fn push_vec_from_other(&mut self, other:&ScriptObjectData){

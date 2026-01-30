@@ -7,6 +7,7 @@ use crate::object::*;
 use crate::array::*;
 use crate::string::*;
 use crate::function::*;
+use crate::*;
 
 
 #[macro_export]
@@ -32,16 +33,16 @@ macro_rules! script_value_bool{
 #[macro_export]
 macro_rules! script_value{
     ($vm:ident, $obj:ident.$id: ident)=>{
-        $vm.heap.value(($obj).into(), id!($id).into(),&$vm.thread.trap)
+        $vm.heap.value(($obj).into(), id!($id).into(),$vm.thread.trap.pass())
     };
     ($vm:ident, $obj:ident.$id:ident.$id2:ident)=>{
-        $vm.heap.value($vm.heap.value(($obj).into(), id!($id).into(),&$vm.thread.trap).into(), id!($id2).into(),&$vm.thread.trap)
+        $vm.heap.value($vm.heap.value(($obj).into(), id!($id).into(), $vm.thread.trap.pass()).into(), id!($id2).into(),$vm.thread.trap.pass())
     };
     ($vm:ident, $obj:ident[$index: expr])=>{
-        $vm.heap.vec_value(($obj).into(), ($index) as usize,&$vm.thread.trap)
+        $vm.heap.vec_value(($obj).into(), ($index) as usize, $vm.thread.trap.pass())
     };
     ($vm:ident, $obj:ident as array[$index: expr])=>{
-        $vm.heap.array_index(($obj).into(), ($index) as usize,&$vm.thread.trap)
+        $vm.heap.array_index(($obj).into(), ($index) as usize, $vm.thread.trap.pass())
     }
 }
 
@@ -49,7 +50,7 @@ macro_rules! script_value{
 macro_rules! script_has_proto{
     ($vm:ident, $what:ident, $obj:ident.$id: ident)=>{
         {
-           let proto = $vm.heap.value(($obj).into(), id!($id).into(),&$vm.thread.trap);
+           let proto = $vm.heap.value(($obj).into(), id!($id).into(),$vm.thread.trap.pass());
            $vm.heap.has_proto(($what).into(), proto)
         }
     };
@@ -67,17 +68,17 @@ macro_rules! script_is_fn{
 #[macro_export]
 macro_rules! script_array_index{
     ($vm:ident, $obj:ident[$index: expr])=>{
-        $vm.heap.array_index(($obj).into(), ($index) as usize,&$vm.thread.trap)
+        $vm.heap.array_index(($obj).into(), ($index) as usize,$vm.thread.trap.pass())
     }
 }
 
 #[macro_export]
 macro_rules! set_script_value{
     ($vm:ident, $obj:ident.$id: ident=$value:expr)=>{
-        $vm.heap.set_value($obj, id!($id).into(), ($value).into(), &$vm.thread.trap)
+        $vm.heap.set_value($obj, id!($id).into(), ($value).into(), $vm.thread.trap.pass())
     };
     ($vm:ident, $obj:ident[$index: expr]=$value:expr)=>{
-        $vm.heap.set_vec_value($obj, ($index) as usize, ($value).into(), &$vm.thread.trap)
+        $vm.heap.set_vec_value($obj, ($index) as usize, ($value).into(), $vm.thread.trap.pass())
     }
 }
 
@@ -86,13 +87,13 @@ macro_rules! set_script_value_to_api{
     ($vm:ident, $obj:ident.$id: ident=$val:expr)=>{
         {
             let v = $val::script_api($vm);
-            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v, &$vm.thread.trap);
+            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v, $vm.thread.trap.pass());
         }
     };
     ($vm:ident, $obj:ident.$id: ident)=>{
         {
             let v = $id::script_api($vm);
-            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v, &$vm.thread.trap);
+            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v, $vm.thread.trap.pass());
         }
     };
 }
@@ -103,14 +104,14 @@ macro_rules! set_script_value_to_pod{
         {
             let v = $val::script_pod($vm).expect("Cant make a pod type");
             $vm.heap.pod_type_name_set(v, id_lut!($id));
-            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v.into(), &$vm.thread.trap);
+            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v.into(), $vm.thread.trap.pass());
         }
     };
     ($vm:ident, $obj:ident.$id: ident)=>{
         {
             let v = $id::script_pod($vm).expect("Cant make a pod type");
             $vm.heap.pod_type_name_set(v, id_lut!($id));
-            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v.into(), &$vm.thread.trap);
+            $vm.heap.set_value(($obj).into(), id_lut!($id).into(), v.into(), $vm.thread.trap.pass());
         }
     };
 }
@@ -153,20 +154,38 @@ impl ScriptNative{
         native
     }
     
+    /// Generic entry point - only boxes the closure, delegates to non-generic helper
+    #[inline(always)]
     pub fn add_fn<F>(&mut self, heap:&mut ScriptHeap, args:&[(LiveId,ScriptValue)], f: F)-> ScriptObject
     where F: Fn(&mut ScriptVm, ScriptObject)->ScriptValue + 'static{
+        let boxed: NativeFn = Box::new(f);
+        self.add_fn_boxed(heap, args, boxed)
+    }
+    
+    /// Non-generic helper that does the actual work - reduces monomorphization
+    #[inline(never)]
+    fn add_fn_boxed(&mut self, heap: &mut ScriptHeap, args: &[(LiveId, ScriptValue)], f: NativeFn) -> ScriptObject {
         let fn_index = self.functions.len();
         let fn_obj = heap.new_with_proto(id!(native).into());
         heap.set_object_storage_vec2(fn_obj);
-        heap.set_fn(fn_obj, ScriptFnPtr::Native(NativeId{index: fn_index as u32}));
+        heap.set_fn(fn_obj, ScriptFnPtr::Native(NativeId { index: fn_index as u32 }));
 
-        for (arg, def) in args{
+        for (arg, def) in args {
             heap.set_value_def(fn_obj, (*arg).into(), *def);
         }
         
-        self.functions.push(Box::new(f));
+        self.functions.push(f);
         
         fn_obj
+    }
+    
+    /// Registers a native function to be used as an apply_transform and returns its NativeId.
+    /// This is used for creating objects that transform to a computed value when applied.
+    pub fn add_apply_transform_fn<F>(&mut self, f: F) -> NativeId
+    where F: Fn(&mut ScriptVm, ScriptObject)->ScriptValue + 'static{
+        let fn_index = self.functions.len();
+        self.functions.push(Box::new(f));
+        NativeId{index: fn_index as u32}
     }
     
     pub fn add_method<F>(&mut self, heap:&mut ScriptHeap, module:ScriptObject, method:LiveId, args:&[(LiveId, ScriptValue)], f: F) 
@@ -197,15 +216,25 @@ impl ScriptNative{
         self.setters[ty_redux.to_index()] = Box::new(f)
     }
             
+    /// Ensures capacity for type tables - non-generic to reduce monomorphization
+    #[inline(never)]
+    fn ensure_type_table_capacity(&mut self, ty_redux: ScriptTypeRedux) {
+        if ty_redux.to_index() as usize >= self.type_table.len() {
+            self.type_table.resize_with(ty_redux.to_index() + 1, || Default::default());
+            self.getters.resize_with(ty_redux.to_index() + 1, || Box::new(|vm, value, field| {
+                script_err_not_found!(vm.thread.trap, "no getter for field {:?} on type {:?}", field, value.value_type())
+            }));
+            self.setters.resize_with(ty_redux.to_index() + 1, || Box::new(|vm, value, field, _| {
+                script_err_not_found!(vm.thread.trap, "no setter for field {:?} on type {:?}", field, value.value_type())
+            }));
+        }
+    }
+    
     pub fn add_type_method<F>(&mut self, heap:&mut ScriptHeap,ty_redux:ScriptTypeRedux, method:LiveId,  args:&[(LiveId,ScriptValue)], f: F) 
     where F: Fn(&mut ScriptVm, ScriptObject)->ScriptValue + 'static{
         let fn_obj = self.add_fn(heap, args, f);
-        if ty_redux.to_index() as usize >= self.type_table.len(){
-            self.type_table.resize_with( ty_redux.to_index() + 1, || Default::default());
-            self.getters.resize_with( ty_redux.to_index() + 1, || Box::new(|vm, _, _|{vm.thread.trap.err_invalid_prop_name()}));
-            self.setters.resize_with( ty_redux.to_index() + 1, || Box::new(|vm, _, _, _|{vm.thread.trap.err_invalid_prop_name()}));
-        }
-        self.type_table[ ty_redux.to_index()].insert(method,fn_obj);
+        self.ensure_type_table_capacity(ty_redux);
+        self.type_table[ty_redux.to_index()].insert(method, fn_obj);
     }
             
     pub fn add_shared(&mut self, heap:&mut ScriptHeap){

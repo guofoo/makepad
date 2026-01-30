@@ -5,9 +5,11 @@ use crate::heap::*;
 use crate::traits::*;
 use crate::array::*;
 use crate::object::*;
+use crate::apply::*;
 use std::hash::Hash;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
+use crate::*;
 
 
 
@@ -42,7 +44,7 @@ impl<T> ScriptNew for  Vec<T> where T: ScriptApply + ScriptNew + 'static + Scrip
                 ScriptArrayStorage::U8(_)=> return true
             }
         }
-        value.is_nil() || T::script_type_check(heap, value)
+        value.is_nil() || T::script_type_check(heap, value) || heap.has_apply_transform(value)
     }
     fn script_default(_vm:&mut ScriptVm)->ScriptValue{NIL}
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()}
@@ -50,13 +52,17 @@ impl<T> ScriptNew for  Vec<T> where T: ScriptApply + ScriptNew + 'static + Scrip
 }
 impl<T> ScriptApply for Vec<T> where T: ScriptApply + ScriptNew + 'static + ScriptDeriveMarker{
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
         if let Some(obj) = value.as_object(){
             let len = vm.heap.vec_len(obj);
             self.resize_with(len, || ScriptNew::script_new(vm));
             for i in 0..len{
                 if let Some(value) = vm.heap.vec_value_if_exist(obj, i){
-                    self[i].script_apply(vm, apply, value);
+                    self[i].script_apply(vm, apply, scope, value);
                 }
             }
         }
@@ -65,7 +71,7 @@ impl<T> ScriptApply for Vec<T> where T: ScriptApply + ScriptNew + 'static + Scri
             self.resize_with(len, || ScriptNew::script_new(vm));
             for i in 0..len{
                 let value = vm.heap.array_index_unchecked(arr, i);
-                self[i].script_apply(vm, apply, value);
+                self[i].script_apply(vm, apply, scope, value);
             }
         }
         else if value.is_nil(){
@@ -78,7 +84,7 @@ impl<T> ScriptApply for Vec<T> where T: ScriptApply + ScriptNew + 'static + Scri
     }
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
         let arr = vm.heap.new_array();
-        let astore = vm.heap.array_mut(arr, &vm.thread.trap).unwrap();
+        let astore = vm.heap.array_mut(arr, vm.thread.trap.pass()).unwrap();
         // we swap the vec off of the heap to be able to script_to_value the rest
         let mut vec_store = ScriptArrayStorage::ScriptValue(Default::default());
         std::mem::swap(&mut vec_store, astore);
@@ -87,7 +93,7 @@ impl<T> ScriptApply for Vec<T> where T: ScriptApply + ScriptNew + 'static + Scri
             for v in self{
                 vec.push_back(v.script_to_value(vm));
             }
-            let astore = vm.heap.array_mut(arr, &vm.thread.trap).unwrap();
+            let astore = vm.heap.array_mut(arr, vm.thread.trap.pass()).unwrap();
             std::mem::swap(&mut vec_store, astore);
         }
         else{
@@ -96,7 +102,7 @@ impl<T> ScriptApply for Vec<T> where T: ScriptApply + ScriptNew + 'static + Scri
                 for v in self{
                     vec.push_back(v.script_to_value(vm));
                 }
-                let astore = vm.heap.array_mut(arr, &vm.thread.trap).unwrap();
+                let astore = vm.heap.array_mut(arr, vm.thread.trap.pass()).unwrap();
                 std::mem::swap(&mut vec_store, astore);
             }
         }
@@ -132,7 +138,7 @@ impl ScriptNew for Vec<u8> {
                 ScriptArrayStorage::U8(_)=> return true
             }
         }
-        value.is_string_like() || value.is_nil()
+        value.is_string_like() || value.is_nil() || heap.has_apply_transform(value)
     }
     fn script_default(vm:&mut ScriptVm)->ScriptValue{
         vm.heap.new_object().into()
@@ -145,7 +151,11 @@ impl ScriptNew for Vec<u8> {
 
 impl ScriptApply for Vec<u8> {
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
         if let Some(obj) = value.as_object(){
             self.clear();
             for kv in vm.heap.vec_ref(obj){
@@ -176,12 +186,12 @@ impl ScriptApply for Vec<u8> {
             self.clear();
         }
         else{
-            vm.thread.trap.err_wrong_type_in_apply();
+            script_err_type_mismatch!(vm.thread.trap, "wrong vec type in apply");
         }
     }
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
         let arr = vm.heap.new_array();
-        let astore = vm.heap.array_mut(arr, &vm.thread.trap).unwrap();
+        let astore = vm.heap.array_mut(arr, vm.thread.trap.pass()).unwrap();
         if let ScriptArrayStorage::U8(v) = astore{v.clear();v.extend(self)}
         else{*astore = ScriptArrayStorage::U8(self.clone());}
         arr.into()
@@ -202,9 +212,14 @@ impl ScriptNew for Vec<ScriptValue> {
         vm.heap.new_object().into()
     }
 }
+
 impl ScriptApply for Vec<ScriptValue> {
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
         if let Some(obj) = value.as_object(){
             self.clear();
             for kv in vm.heap.vec_ref(obj){
@@ -231,7 +246,7 @@ impl ScriptApply for Vec<ScriptValue> {
     }
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
         let arr = vm.heap.new_array();
-        let astore = vm.heap.array_mut(arr, &vm.thread.trap).unwrap();
+        let astore = vm.heap.array_mut(arr, vm.thread.trap.pass()).unwrap();
         if let ScriptArrayStorage::ScriptValue(v) = astore{v.clear();v.extend(self)}
         else{*astore = ScriptArrayStorage::ScriptValue(self.iter().cloned().collect());}
         arr.into()
@@ -262,7 +277,7 @@ impl<K,V> ScriptNew for HashMap<K,V>
             }
             return true
         }
-        value.is_nil()
+        value.is_nil() || heap.has_apply_transform(value)
     }
     fn script_default(_vm:&mut ScriptVm)->ScriptValue{NIL}
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()}
@@ -272,7 +287,11 @@ impl<K,V> ScriptApply for HashMap<K,V>
     where K: ScriptApply + ScriptNew  + 'static  + Eq + Hash,
           V: ScriptApply + ScriptNew  + 'static  {
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
         if let Some(obj) = value.as_object(){
             // hashmaps and btreemaps are cleared and copied fresh we can optimise later
             self.clear();
@@ -288,7 +307,7 @@ impl<K,V> ScriptApply for HashMap<K,V>
             self.clear()
         }
         else{
-            vm.thread.trap.err_wrong_type_in_apply();
+            script_err_type_mismatch!(vm.thread.trap, "wrong vec type in apply");
         }
     }
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{
@@ -329,7 +348,7 @@ impl<K,V> ScriptNew for BTreeMap<K,V>
             }
             return true
         }
-        value.is_nil()
+        value.is_nil() || heap.has_apply_transform(value)
     }
     fn script_default(_vm:&mut ScriptVm)->ScriptValue{NIL}
     fn script_new(_vm:&mut ScriptVm)->Self{Default::default()}
@@ -339,7 +358,11 @@ impl<K,V> ScriptApply for BTreeMap<K,V>
     where K: ScriptApply + ScriptNew  + 'static + Ord,
           V: ScriptApply + ScriptNew  + 'static {
     fn script_type_id(&self)->ScriptTypeId{ScriptTypeId::of::<Self>()}
-    fn script_apply(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
+    fn script_apply(&mut self, vm:&mut ScriptVm, apply:&Apply, scope:&mut Scope, value:ScriptValue){
+        // Check for apply transform
+        if let Some(transformed) = vm.call_apply_transform(value) {
+            return self.script_apply(vm, apply, scope, transformed);
+        }
         if let Some(obj) = value.as_object(){
             // hashmaps and btreemaps are cleared and copied fresh we can optimise later
             self.clear();
@@ -355,7 +378,7 @@ impl<K,V> ScriptApply for BTreeMap<K,V>
             self.clear()
         }
         else{
-            vm.thread.trap.err_wrong_type_in_apply();
+            script_err_type_mismatch!(vm.thread.trap, "wrong vec type in apply");
         }
     }
     fn script_to_value(&self, vm:&mut ScriptVm)->ScriptValue{

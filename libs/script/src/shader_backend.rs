@@ -52,6 +52,7 @@ impl ShaderBackend{
                         SHADER_IO_TEXTURE_DEPTH=>(ShaderIoKind::Texture(TextureType::TextureDepth), ShaderIoPrefix::Prefix("_io.")),
                         SHADER_IO_TEXTURE_DEPTH_ARRAY=>(ShaderIoKind::Texture(TextureType::TextureDepthArray), ShaderIoPrefix::Prefix("_io.")),
                         SHADER_IO_SAMPLER=>(ShaderIoKind::Sampler(ShaderSamplerOptions::default()), ShaderIoPrefix::Prefix("_io.")),
+                        SHADER_IO_SCOPE_UNIFORM=>(ShaderIoKind::ScopeUniform, ShaderIoPrefix::Prefix("_io.su->")),
                         
                         _=>panic!()
                     }
@@ -79,6 +80,7 @@ impl ShaderBackend{
                             SHADER_IO_TEXTURE_DEPTH=>(ShaderIoKind::Texture(TextureType::TextureDepth), ShaderIoPrefix::Prefix("_io.")),
                             SHADER_IO_TEXTURE_DEPTH_ARRAY=>(ShaderIoKind::Texture(TextureType::TextureDepthArray), ShaderIoPrefix::Prefix("_io.")),
                             SHADER_IO_SAMPLER=>(ShaderIoKind::Sampler(ShaderSamplerOptions::default()), ShaderIoPrefix::Prefix("_io.")),
+                            SHADER_IO_SCOPE_UNIFORM=>(ShaderIoKind::ScopeUniform, ShaderIoPrefix::Prefix("_io.su->")),
                             _=>panic!()
                         }
                     }
@@ -112,6 +114,7 @@ impl ShaderBackend{
                              SHADER_IO_TEXTURE_DEPTH=>(ShaderIoKind::Texture(TextureType::TextureDepth), ShaderIoPrefix::Prefix("")),
                              SHADER_IO_TEXTURE_DEPTH_ARRAY=>(ShaderIoKind::Texture(TextureType::TextureDepthArray), ShaderIoPrefix::Prefix("")),
                              SHADER_IO_SAMPLER=>(ShaderIoKind::Sampler(ShaderSamplerOptions::default()), ShaderIoPrefix::Prefix("")),
+                             SHADER_IO_SCOPE_UNIFORM=>(ShaderIoKind::ScopeUniform, ShaderIoPrefix::Prefix("su_")),
                              _=>panic!()
                          }
                      }
@@ -139,6 +142,7 @@ impl ShaderBackend{
                              SHADER_IO_TEXTURE_DEPTH=>(ShaderIoKind::Texture(TextureType::TextureDepth), ShaderIoPrefix::Prefix("")),
                              SHADER_IO_TEXTURE_DEPTH_ARRAY=>(ShaderIoKind::Texture(TextureType::TextureDepthArray), ShaderIoPrefix::Prefix("")),
                              SHADER_IO_SAMPLER=>(ShaderIoKind::Sampler(ShaderSamplerOptions::default()), ShaderIoPrefix::Prefix("")),
+                             SHADER_IO_SCOPE_UNIFORM=>(ShaderIoKind::ScopeUniform, ShaderIoPrefix::Prefix("su_")),
                              _=>panic!()
                          }
                      }
@@ -169,6 +173,7 @@ impl ShaderBackend{
                     SHADER_IO_TEXTURE_DEPTH=>(ShaderIoKind::Texture(TextureType::TextureDepth), ShaderIoPrefix::Prefix("tex_")),
                     SHADER_IO_TEXTURE_DEPTH_ARRAY=>(ShaderIoKind::Texture(TextureType::TextureDepthArray), ShaderIoPrefix::Prefix("tex_")),
                     SHADER_IO_SAMPLER=>(ShaderIoKind::Sampler(ShaderSamplerOptions::default()), ShaderIoPrefix::Prefix("sampler_")),
+                    SHADER_IO_SCOPE_UNIFORM=>(ShaderIoKind::ScopeUniform, ShaderIoPrefix::Prefix("su_")),
                     _=>panic!()
                 }
             }
@@ -221,6 +226,20 @@ impl ShaderBackend{
                 _ => ""
             }
             _ => ""
+        }
+    }
+    
+    /// Generate a variable declaration statement for the backend.
+    /// For C-style backends (Metal, HLSL, GLSL): `type_name var_name;\n`
+    /// For WGSL: `var var_name:type_name;\n`
+    pub fn write_var_decl(&self, out: &mut String, ty_name: LiveId, var_name: &str) {
+        match self {
+            Self::Metal | Self::Hlsl | Self::Glsl => {
+                write!(out, "{} {};\n", ty_name, var_name).ok();
+            }
+            Self::Wgsl => {
+                write!(out, "var {}:{};\n", var_name, ty_name).ok();
+            }
         }
     }
     
@@ -288,6 +307,7 @@ impl ShaderBackend{
                 id_lut!(ddx);
                 id_lut!(ddy);
                 id_lut!(rsqrt);
+                id_lut!(fmod);
             }
             Self::Glsl=>{
                 id_lut!(float);
@@ -328,6 +348,7 @@ impl ShaderBackend{
                     id!(dFdx)=>id!(dfdx),
                     id!(dFdy)=>id!(dfdy),
                     id!(inverseSqrt)=>id!(rsqrt),
+                    id!(modf)=>id!(fmod),
                     x=>x
                 }
             }
@@ -336,19 +357,20 @@ impl ShaderBackend{
                     id!(dFdx)=>id!(ddx),
                     id!(dFdy)=>id!(ddy),
                     id!(inverseSqrt)=>id!(rsqrt),
+                    id!(modf)=>id!(fmod),
                     x=>x
                 }
             }
             Self::Glsl=>{
                 match name_in{
-                    // GLSL uses dFdx/dFdy natively
+                    // GLSL uses dFdx/dFdy natively, mod is native
                     id!(inverseSqrt)=>id!(inversesqrt),
                     x=>x
                 }
             }
             Self::Wgsl=>{
                 match name_in{
-                    // WGSL uses dpdx/dpdy
+                    // WGSL uses dpdx/dpdy, mod is native (%)
                     id!(dFdx)=>id!(dpdx),
                     id!(dFdy)=>id!(dpdy),
                     id!(inverseSqrt)=>id!(inverseSqrt),

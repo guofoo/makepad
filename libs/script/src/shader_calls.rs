@@ -13,6 +13,9 @@ use crate::pod::*;
 use crate::shader::*;
 use crate::shader_builtins::*;
 use crate::shader_backend::*;
+use crate::trap::*;
+use crate::suggest::*;
+use crate::*;
 
 impl ShaderFnCompiler {
     pub(crate) fn handle_pod_type_call(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, opargs: OpcodeArgs, pod_ty: ScriptPodType, name: LiveId) {
@@ -37,7 +40,7 @@ impl ShaderFnCompiler {
     }
 
     pub(crate) fn handle_call_args(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, opargs: OpcodeArgs) {
-        let (ty, _s) = self.stack.pop(&self.trap);
+        let (ty, _s) = self.stack.pop(self.trap.pass());
         if let ShaderType::Id(name) = ty {
             // Check shader scope for PodType
             if let Some((ShaderScopeItem::PodType { ty, .. }, _)) = self.shader_scope.find_var(name) {
@@ -46,7 +49,7 @@ impl ShaderFnCompiler {
             }
 
             // alright lets look it up on our script scope
-            let value = vm.heap.scope_value(self.script_scope, name.into(), &self.trap);
+            let value = vm.heap.scope_value(self.script_scope, name.into(), self.trap.pass());
             // lets check if our obj is a PodType
             if let Some(pod_ty) = vm.heap.pod_type(value) {
                 self.handle_pod_type_call(vm, output, opargs, pod_ty, name);
@@ -85,7 +88,7 @@ impl ShaderFnCompiler {
                 }
             }
         }
-        self.trap.err_not_fn();
+        script_err_wrong_value!(self.trap, "shader call target is not a function");
     }
 
     pub(crate) fn handle_array_construct(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, args: Vec<String>, elem_ty: Option<ScriptPodType>) {
@@ -135,7 +138,7 @@ impl ShaderFnCompiler {
                 }
             }
         } else {
-            self.trap.err_no_matching_shader_type();
+            script_err_shader!(self.trap, "no shader type for array element");
             match output.backend {
                 ShaderBackend::Wgsl => {
                     write!(out, "(").ok();
@@ -169,7 +172,7 @@ impl ShaderFnCompiler {
             self.stack.free_string(s);
         }
 
-        self.stack.push(&self.trap, ShaderType::Pod(array_ty), out);
+        self.stack.push(self.trap.pass(), ShaderType::Pod(array_ty), out);
     }
 
     pub(crate) fn handle_pod_construct(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, pod_ty: ScriptPodType, args: Vec<ShaderPodArg>) {
@@ -195,7 +198,7 @@ impl ShaderFnCompiler {
                 }
             }
         } else {
-            self.trap.err_no_matching_shader_type();
+            script_err_shader!(self.trap, "no shader type for pod construct");
         }
 
         if let Some(first) = args.first() {
@@ -213,16 +216,16 @@ impl ShaderFnCompiler {
                             match &arg.ty {
                                 ShaderType::Pod(arg_pod_ty) => {
                                     if *arg_pod_ty != field.ty.self_ref {
-                                        self.trap.err_pod_type_not_matching();
+                                        script_err_pod!(self.trap, "named arg {:?} type mismatch: expected {}, got {}", field.name, format_pod_type_name(&vm.heap, field.ty.self_ref), format_pod_type_name(&vm.heap, *arg_pod_ty));
                                     }
                                 }
                                 ShaderType::Id(id) => {
                                     if let Some((v, _name)) = self.shader_scope.find_var(*id) {
                                         if v.ty() != field.ty.self_ref {
-                                            self.trap.err_pod_type_not_matching();
+                                            script_err_pod!(self.trap, "var {:?} type mismatch for field {:?}: expected {}, got {}", id, field.name, format_pod_type_name(&vm.heap, field.ty.self_ref), format_pod_type_name(&vm.heap, v.ty()));
                                         }
                                     } else {
-                                        self.trap.err_not_found();
+                                        script_err_not_found!(self.trap, "var {:?} not found{}", id, suggest_from_live_ids(*id, &self.shader_scope.all_var_names()));
                                     }
                                 }
                                 ShaderType::AbstractInt => {
@@ -231,28 +234,28 @@ impl ShaderFnCompiler {
                                         && field.ty.self_ref != builtins.pod_u32
                                         && field.ty.self_ref != builtins.pod_f32
                                     {
-                                        self.trap.err_pod_type_not_matching();
+                                        script_err_pod!(self.trap, "abstract int not compatible with field {:?} (expects {})", field.name, format_pod_type_name(&vm.heap, field.ty.self_ref));
                                     }
                                 }
                                 ShaderType::AbstractFloat => {
                                     let builtins = &vm.code.builtins.pod;
                                     if field.ty.self_ref != builtins.pod_f32 {
-                                        self.trap.err_pod_type_not_matching();
+                                        script_err_pod!(self.trap, "abstract float not compatible with field {:?} (expects {})", field.name, format_pod_type_name(&vm.heap, field.ty.self_ref));
                                     }
                                 }
                                 _ => {}
                             }
                             out.push_str(&arg.s);
                         } else {
-                            self.trap.err_invalid_constructor_arg();
+                            script_err_type_mismatch!(self.trap, "missing arg for field {:?}", field.name);
                         }
                     }
 
                     if args.len() != fields.len() {
-                        self.trap.err_invalid_arg_count();
+                        script_err_invalid_args!(self.trap, "expected {} args, got {}", fields.len(), args.len());
                     }
                 } else {
-                    self.trap.err_unexpected();
+                    script_err_unexpected!(self.trap, "named args require struct type");
                 }
             } else {
                 // Positional args
@@ -262,31 +265,34 @@ impl ShaderFnCompiler {
                     }
                     match &arg.ty {
                         ShaderType::Pod(pod_ty_field) | ShaderType::PodPtr(pod_ty_field) => {
-                            vm.heap.pod_check_constructor_arg(pod_ty, *pod_ty_field, &mut offset, &self.trap);
+                            vm.heap.pod_check_constructor_arg(pod_ty, *pod_ty_field, &mut offset, self.trap.pass());
                         }
                         ShaderType::Id(id) => {
                             if let Some((v, _name)) = self.shader_scope.find_var(*id) {
-                                vm.heap.pod_check_constructor_arg(pod_ty, v.ty(), &mut offset, &self.trap);
+                                vm.heap.pod_check_constructor_arg(pod_ty, v.ty(), &mut offset, self.trap.pass());
                             } else {
-                                self.trap.err_not_found();
+                                script_err_not_found!(self.trap, "var {:?} not found in constructor{}", id, suggest_from_live_ids(*id, &self.shader_scope.all_var_names()));
                             }
                         }
                         ShaderType::AbstractInt | ShaderType::AbstractFloat => {
-                            vm.heap.pod_check_abstract_constructor_arg(pod_ty, &mut offset, &self.trap);
+                            vm.heap.pod_check_abstract_constructor_arg(pod_ty, &mut offset, self.trap.pass());
                         }
                         ShaderType::None
                         | ShaderType::Range { .. }
                         | ShaderType::Error(_)
                         | ShaderType::IoSelf(_)
+                        | ShaderType::ScopeObject(_)
+                        | ShaderType::ScopeUniformBuffer { .. }
+                        | ShaderType::ScopeTexture { .. }
                         | ShaderType::PodType(_)
                         | ShaderType::Texture(_) => {}
                     }
                     out.push_str(&arg.s);
                 }
-                vm.heap.pod_check_constructor_arg_count(pod_ty, &offset, &self.trap);
+                vm.heap.pod_check_constructor_arg_count(pod_ty, &offset, self.trap.pass());
             }
         } else {
-            vm.heap.pod_check_constructor_arg_count(pod_ty, &offset, &self.trap);
+            vm.heap.pod_check_constructor_arg_count(pod_ty, &offset, self.trap.pass());
         }
 
         match output.backend {
@@ -309,12 +315,13 @@ impl ShaderFnCompiler {
             self.stack.free_string(arg.s);
         }
 
-        self.stack.push(&self.trap, ShaderType::Pod(pod_ty), out);
+        self.stack.push(self.trap.pass(), ShaderType::Pod(pod_ty), out);
     }
 
     pub fn compile_shader_def(
         vm: &mut ScriptVm,
         output: &mut ShaderOutput,
+        trap: ScriptTrap,
         name: LiveId,
         fnobj: ScriptObject,
         sself: ShaderType,
@@ -331,20 +338,26 @@ impl ShaderFnCompiler {
             }
         } else if let ShaderType::IoSelf(_) = sself {
             write!(method_name_prefix, "io_").ok();
+        } else if let ShaderType::ScopeObject(obj) = sself {
+            // Use the object index to create a unique prefix for scope object methods
+            write!(method_name_prefix, "scope{}_", obj.index).ok();
         }
 
         // First pass: resolve AbstractInt/AbstractFloat against declared parameter types
+        // Also count expected parameters to validate argument count
         let builtins = &vm.code.builtins.pod;
         let argc = vm.heap.vec_len(fnobj);
         let mut resolved_args: Vec<ScriptPodType> = Vec::new();
         let mut argi = 0;
+        let mut expected_param_count = 0;
         for i in 0..argc {
-            let kv = vm.heap.vec_key_value(fnobj, i, &vm.thread.trap);
+            let kv = vm.heap.vec_key_value(fnobj, i, trap);
             if kv.key == id!(self).into() {
                 continue;
             }
+            expected_param_count += 1;
             if argi >= args.len() {
-                break;
+                continue; // Keep counting expected params but skip arg processing
             }
             let arg = &args[argi];
             // Get declared parameter type from kv.value
@@ -364,6 +377,19 @@ impl ShaderFnCompiler {
             };
             resolved_args.push(resolved);
             argi += 1;
+        }
+
+        // Validate argument count
+        if args.len() != expected_param_count {
+            output.has_errors = true;
+            script_err_invalid_args!(trap, 
+                "function {:?} expects {} argument{}, but {} {} provided",
+                name,
+                expected_param_count,
+                if expected_param_count == 1 { "" } else { "s" },
+                args.len(),
+                if args.len() == 1 { "was" } else { "were" }
+            );
         }
 
         // lets see if we already have fnobj with our argstypes
@@ -445,16 +471,21 @@ impl ShaderFnCompiler {
             }
             write!(fn_args, "{}", output.backend.get_io_self_decl(output.mode)).ok();
             compiler.shader_scope.define_io_self(obj);
+        } else if let ShaderType::ScopeObject(obj) = sself {
+            // ScopeObject methods don't have a _self parameter - `self` references
+            // are resolved to IoScopeUniform accesses at compile time
+            compiler.shader_scope.define_scope_object(obj);
         }
 
         let argc = vm.heap.vec_len(fnobj);
         let mut argi = 0;
         for i in 0..argc {
-            let kv = vm.heap.vec_key_value(fnobj, i, &vm.thread.trap);
+            let kv = vm.heap.vec_key_value(fnobj, i, trap);
 
             if kv.key == id!(self).into() {
                 if !has_self || argi != 0 {
-                    vm.thread.trap.err_invalid_arg_name();
+                    output.has_errors = true;
+                    script_err_not_found!(trap, "self arg must be first with has_self");
                 }
                 continue;
             }
@@ -464,7 +495,8 @@ impl ShaderFnCompiler {
                     write!(fn_args, ", ").ok();
                 }
                 if argi >= resolved_args.len() {
-                    vm.thread.trap.err_invalid_arg_count();
+                    output.has_errors = true;
+                    script_err_invalid_args!(trap, "more formal params than resolved args");
                     break;
                 }
                 let arg_ty = resolved_args[argi];
@@ -493,18 +525,25 @@ impl ShaderFnCompiler {
             argi += 1;
         }
         if argi < resolved_args.len() {
-            vm.thread.trap.err_invalid_arg_count();
+            output.has_errors = true;
+            script_err_invalid_args!(trap, "fewer formal params than resolved args");
         }
 
         if let Some(fnptr) = vm.heap.as_fn(fnobj) {
             if let ScriptFnPtr::Script(fnip) = fnptr {
                 if output.recur_block.iter().any(|v| *v == fnobj) {
-                    vm.thread.trap.err_recursion_not_allowed();
+                    output.has_errors = true;
+                    script_err_not_allowed!(trap, "shader functions cannot recurse");
                     (vm.code.builtins.pod.pod_void, fn_name)
                 } else {
                     output.recur_block.push(fnobj);
                     let ret = compiler.compile_fn(vm, output, fnip);
                     output.recur_block.pop();
+
+                    // Ensure struct return types are registered in output.structs
+                    if let ScriptPodTy::Struct{..} = vm.heap.pod_type_ref(ret).ty {
+                        output.structs.insert(ret);
+                    }
 
                     match output.backend {
                         ShaderBackend::Wgsl => {
@@ -558,13 +597,31 @@ impl ShaderFnCompiler {
     ) {
         // we should compare number of arguments (needs to be exact)
         // Note: fn_name already includes "(" at the end from compile_shader_def
-        let (ret, fn_name) = Self::compile_shader_def(vm, output, name, fnobj, sself, args);
+        let (ret, fn_name) = Self::compile_shader_def(vm, output, self.trap.pass(), name, fnobj, sself, args);
         out.insert_str(0, &fn_name);
         out.push_str(")");
-        self.stack.push(&self.trap, ShaderType::Pod(ret), out);
+        self.stack.push(self.trap.pass(), ShaderType::Pod(ret), out);
     }
 
     pub(crate) fn handle_call_exec(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput) {
+        // Only pop if the top of the stack is a call-related ME, not a control flow ME
+        // This prevents corrupting the ME stack when a call setup (CALL_ARGS/CALL_METHOD_ARGS) fails
+        let is_call_me = matches!(
+            self.mes.last(),
+            Some(ShaderMe::ArrayConstruct { .. })
+                | Some(ShaderMe::Pod { .. })
+                | Some(ShaderMe::ScriptCall { .. })
+                | Some(ShaderMe::TextureBuiltin { .. })
+                | Some(ShaderMe::BuiltinCall { .. })
+                | Some(ShaderMe::PodBuiltinMethod { .. })
+        );
+        if !is_call_me {
+            // No call ME was pushed - the call setup must have failed
+            // Push a dummy value onto the stack so subsequent code doesn't break
+            let s = self.stack.new_string();
+            self.stack.push(self.trap.pass(), ShaderType::Error(NIL), s);
+            return;
+        }
         if let Some(me) = self.mes.pop() {
             match me {
                 ShaderMe::ArrayConstruct { args, elem_ty } => {
@@ -580,75 +637,75 @@ impl ShaderFnCompiler {
                     self.handle_texture_builtin_exec(vm, output, method_id, texture_expr, args);
                 }
                 ShaderMe::BuiltinCall { name, fnptr: _, args } => {
-                    let builtins = &vm.code.builtins.pod;
-
-                    // Helper to check if a pod type is float-based
-                    let is_float_type = |pt: ScriptPodType| -> bool {
-                        let pod_ty = &vm.heap.pod_types[pt.index as usize];
-                        match &pod_ty.ty {
-                            ScriptPodTy::F32 | ScriptPodTy::F16 => true,
-                            ScriptPodTy::Vec(v) => matches!(v.elem_ty(), ScriptPodTy::F32 | ScriptPodTy::F16),
-                            ScriptPodTy::Mat(_) => true, // Matrices are float-based
-                            _ => false,
-                        }
-                    };
-
-                    // Check if any arg is a float type - if so, abstract ints should be floats
-                    let has_float = args.iter().any(|(ty, _)| match ty {
-                        ShaderType::Pod(pt) => is_float_type(*pt),
-                        ShaderType::AbstractFloat => true,
-                        _ => false,
-                    });
-
-                    // Build concrete args for type_table_builtin and format output
-                    let mut concrete_args = Vec::new();
-                    let mut out = self.stack.new_string();
-                    let mapped_name = output.backend.map_builtin_name(name);
-                    write!(out, "{}(", mapped_name).ok();
-
-                    for (i, (ty, s)) in args.into_iter().enumerate() {
-                        if i > 0 {
-                            out.push_str(", ");
-                        }
-
-                        match &ty {
-                            ShaderType::AbstractInt | ShaderType::AbstractFloat => {
-                                if has_float {
-                                    // Format as float literal
-                                    concrete_args.push(builtins.pod_f32);
-                                    // Check if s is a simple integer that needs .0 suffix
-                                    if s.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                                        out.push_str(&s);
-                                        out.push_str(".0");
-                                    } else {
-                                        out.push_str(&s);
-                                    }
-                                } else {
-                                    concrete_args.push(ty.make_concrete(builtins).unwrap_or(builtins.pod_void));
-                                    out.push_str(&s);
-                                }
-                            }
-                            ShaderType::Pod(pt) => {
-                                concrete_args.push(*pt);
-                                out.push_str(&s);
-                            }
-                            _ => {
-                                concrete_args.push(ty.make_concrete(builtins).unwrap_or(builtins.pod_void));
-                                out.push_str(&s);
-                            }
-                        }
-                        self.stack.free_string(s);
-                    }
-
-                    out.push_str(")");
-                    let ret = type_table_builtin(name, &concrete_args, builtins, &self.trap);
-                    self.stack.push(&self.trap, ShaderType::Pod(ret), out);
+                    self.handle_builtin_call(vm, output, name, args);
+                }
+                ShaderMe::PodBuiltinMethod { name, self_ty: _, args } => {
+                    // Pod builtin method: x.mix(y, a) -> mix(x, y, a)
+                    // Reuse the same logic as BuiltinCall
+                    self.handle_builtin_call(vm, output, name, args);
                 }
                 _ => {
-                    self.trap.err_not_impl();
+                    // This case should not be reached due to the guard at the top of handle_call_exec
+                    script_err_not_impl!(self.trap, "CALL_EXEC: unexpected call type in shader (internal error)");
                 }
             }
         }
+    }
+    
+    /// Handle a builtin function call (either from BuiltinCall or PodBuiltinMethod)
+    fn handle_builtin_call(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, name: LiveId, args: Vec<(ShaderType, String)>) {
+        let builtins = &vm.code.builtins.pod;
+
+        // Check if any arg is a float type - if so, abstract ints should be floats
+        let has_float = args.iter().any(|(ty, _)| match ty {
+            ShaderType::Pod(pt) => vm.heap.pod_types[pt.index as usize].ty.is_float_type(),
+            ShaderType::AbstractFloat => true,
+            _ => false,
+        });
+
+        // Build concrete args for type_table_builtin and format output
+        let mut concrete_args = Vec::new();
+        let mut out = self.stack.new_string();
+        let mapped_name = output.backend.map_builtin_name(name);
+        write!(out, "{}(", mapped_name).ok();
+
+        for (i, (ty, s)) in args.into_iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+
+            match &ty {
+                ShaderType::AbstractInt | ShaderType::AbstractFloat => {
+                    if has_float {
+                        // Format as float literal
+                        concrete_args.push(builtins.pod_f32);
+                        // Check if s is a simple integer that needs .0 suffix
+                        if s.chars().all(|c| c.is_ascii_digit() || c == '-') {
+                            out.push_str(&s);
+                            out.push_str(".0");
+                        } else {
+                            out.push_str(&s);
+                        }
+                    } else {
+                        concrete_args.push(ty.make_concrete(builtins).unwrap_or(builtins.pod_void));
+                        out.push_str(&s);
+                    }
+                }
+                ShaderType::Pod(pt) => {
+                    concrete_args.push(*pt);
+                    out.push_str(&s);
+                }
+                _ => {
+                    concrete_args.push(ty.make_concrete(builtins).unwrap_or(builtins.pod_void));
+                    out.push_str(&s);
+                }
+            }
+            self.stack.free_string(s);
+        }
+
+        out.push_str(")");
+        let ret = type_table_builtin(name, &concrete_args, builtins, self.trap.pass());
+        self.stack.push(self.trap.pass(), ShaderType::Pod(ret), out);
     }
 
     pub(crate) fn handle_texture_builtin_exec(
@@ -670,27 +727,28 @@ impl ShaderFnCompiler {
                         write!(s, "float2({}.get_width(), {}.get_height())", texture_expr, texture_expr).ok();
                     }
                     ShaderBackend::Wgsl => {
-                        // WGSL: textureDimensions(texture) - returns vec2<u32>, cast to vec2<f32>
-                        write!(s, "vec2f(0.0, 0.0)").ok(); // Placeholder
+                        // WGSL: textureDimensions(texture) returns vec2<u32>, cast to vec2<f32>
+                        write!(s, "vec2f(textureDimensions({}))", texture_expr).ok();
                     }
                     ShaderBackend::Hlsl => {
-                        // HLSL: texture.GetDimensions()
-                        write!(s, "float2(0.0, 0.0)").ok(); // Placeholder
+                        // HLSL: GetDimensions requires output params, use helper function
+                        output.hlsl_needs_tex_size = true;
+                        write!(s, "_mpTexSize2D({})", texture_expr).ok();
                     }
                     ShaderBackend::Glsl => {
-                        // GLSL: textureSize(texture, 0)
-                        write!(s, "vec2(0.0, 0.0)").ok(); // Placeholder
+                        // GLSL: textureSize(texture, 0) returns ivec2, cast to vec2
+                        write!(s, "vec2(textureSize({}, 0))", texture_expr).ok();
                     }
                 }
-                self.stack.push(&self.trap, ShaderType::Pod(vm.code.builtins.pod.pod_vec2f), s);
+                self.stack.push(self.trap.pass(), ShaderType::Pod(vm.code.builtins.pod.pod_vec2f), s);
             }
-            id!(sample_2d) => {
-                // sample_2d(coord) samples the texture at normalized coordinates
+            id!(sample) => {
+                // sample(coord) samples the texture at normalized coordinates
                 // Returns vec4f
                 if args.len() != 1 {
-                    self.trap.err_invalid_arg_count();
+                    script_err_invalid_args!(self.trap, "texture.sample requires 1 arg");
                     let empty = self.stack.new_string();
-                    self.stack.push(&self.trap, ShaderType::Pod(vm.code.builtins.pod.pod_vec4f), empty);
+                    self.stack.push(self.trap.pass(), ShaderType::Pod(vm.code.builtins.pod.pod_vec4f), empty);
                 } else {
                     let coord = &args[0];
                     let mut s = self.stack.new_string();
@@ -706,22 +764,22 @@ impl ShaderFnCompiler {
                         }
                         ShaderBackend::Wgsl => {
                             // WGSL: textureSample(texture, sampler, coord)
-                            write!(s, "vec4f(0.0, 0.0, 0.0, 0.0)").ok(); // Placeholder
+                            write!(s, "textureSample({}, _s{}, {})", texture_expr, sampler_idx, coord).ok();
                         }
                         ShaderBackend::Hlsl => {
                             // HLSL: texture.Sample(sampler, coord)
-                            write!(s, "float4(0.0, 0.0, 0.0, 0.0)").ok(); // Placeholder
+                            write!(s, "{}.Sample(_s{}, {})", texture_expr, sampler_idx, coord).ok();
                         }
                         ShaderBackend::Glsl => {
-                            // GLSL: texture(sampler2D, coord)
-                            write!(s, "vec4(0.0, 0.0, 0.0, 0.0)").ok(); // Placeholder
+                            // GLSL 4.0+: texture(sampler2D(texture, sampler), coord)
+                            write!(s, "texture(sampler2D({}, _s{}), {})", texture_expr, sampler_idx, coord).ok();
                         }
                     }
-                    self.stack.push(&self.trap, ShaderType::Pod(vm.code.builtins.pod.pod_vec4f), s);
+                    self.stack.push(self.trap.pass(), ShaderType::Pod(vm.code.builtins.pod.pod_vec4f), s);
                 }
             }
             _ => {
-                self.trap.err_not_found();
+                script_err_not_found!(self.trap, "unknown texture method {:?}{}",  method_id, suggest_from_live_ids(method_id, &[id!(sample), id!(size)]));
             }
         }
         self.stack.free_string(texture_expr);
@@ -731,13 +789,19 @@ impl ShaderFnCompiler {
     }
 
     pub(crate) fn handle_method_call_args(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, opargs: OpcodeArgs) {
-        let (method_ty, method_s) = self.stack.pop(&self.trap);
-        let (self_ty, self_s) = self.stack.pop(&self.trap);
+        let (method_ty, method_s) = self.stack.pop(self.trap.pass());
+        let (self_ty, self_s) = self.stack.pop(self.trap.pass());
         self.stack.free_string(method_s);
 
         if let ShaderType::Id(method_id) = method_ty {
             // Handle method calls on Texture types (e.g., texture.size())
             if let ShaderType::Texture(tex_type) = self_ty {
+                self.handle_texture_method_call_args(vm, output, opargs, method_id, tex_type, self_s);
+                return;
+            }
+            
+            // Handle method calls on ScopeTexture types (e.g., scope_texture.sample())
+            if let ShaderType::ScopeTexture { tex_type, .. } = self_ty {
                 self.handle_texture_method_call_args(vm, output, opargs, method_id, tex_type, self_s);
                 return;
             }
@@ -765,16 +829,66 @@ impl ShaderFnCompiler {
                             return;
                         }
                     }
+                    
+                    // Method not found on the type
+                    self.stack.free_string(self_s);
+                    let type_name = if let Some(pod_ty) = pod_ty_opt {
+                        vm.heap.pod_type_name(pod_ty)
+                            .map(|id| id.as_string(|s| s.unwrap_or("unknown").to_string()))
+                            .unwrap_or_else(|| "unknown".to_string())
+                    } else {
+                        format!("{:?}", self_id)
+                    };
+                    script_err_not_found!(self.trap, "method {:?} not found on {}", method_id, type_name);
+                    return;
                 } else {
                     // Try to resolve as PodType static method in script scope
                     if self.handle_pod_type_method_call_args(vm, output, opargs, method_id, self_id, &self_s) {
                         return;
                     }
+                    
+                    // Not a PodType - try as ScopeObject method call
+                    if self.handle_scope_object_method_call_by_id(vm, output, opargs, method_id, self_id) {
+                        self.stack.free_string(self_s);
+                        return;
+                    }
+                    
+                    // Try as scope texture method call (e.g., test_tex.sample(...))
+                    if self.handle_scope_texture_method_call_by_id(vm, output, opargs, method_id, self_id) {
+                        self.stack.free_string(self_s);
+                        return;
+                    }
+                    
+                    // Nothing matched - variable or type not found
+                    self.stack.free_string(self_s);
+                    script_err_not_found!(self.trap, "method {:?} not found on {:?}", method_id, self_id);
+                    return;
                 }
             }
+            
+            // self_ty is directly a Pod type (not an Id that resolves to a Pod)
+            if let ShaderType::Pod(pod_ty) = self_ty {
+                if self.handle_pod_method_call_args(vm, output, opargs, method_id, pod_ty, &self_s.clone(), &self_s) {
+                    return;
+                }
+                // Method not found on pod type
+                let type_name = vm.heap.pod_type_name(pod_ty)
+                    .map(|id| id.as_string(|s| s.unwrap_or("unknown").to_string()))
+                    .unwrap_or_else(|| "unknown".to_string());
+                self.stack.free_string(self_s);
+                script_err_not_found!(self.trap, "method {:?} not found on {}", method_id, type_name);
+                return;
+            }
+            
+            // self_ty wasn't an Id or Pod - some other type
+            let type_name = self.shader_type_to_string(vm, &self_ty);
+            self.stack.free_string(self_s);
+            script_err_not_found!(self.trap, "method {:?} not found on {}", method_id, type_name);
+            return;
         }
+        
         self.stack.free_string(self_s);
-        self.trap.err_not_impl();
+        script_err_not_impl!(self.trap, "METHOD_CALL_ARGS: method call syntax not valid here");
     }
 
     pub(crate) fn handle_io_self_method_call_args(
@@ -786,7 +900,7 @@ impl ShaderFnCompiler {
         obj: ScriptObject,
         _self_s: &str,
     ) -> bool {
-        let fnobj = vm.heap.value(obj, method_id.into(), &self.trap);
+        let fnobj = vm.heap.value(obj, method_id.into(), self.trap.pass());
         if let Some(fnobj) = fnobj.as_object() {
             if let Some(fnptr) = vm.heap.as_fn(fnobj) {
                 match fnptr {
@@ -815,6 +929,174 @@ impl ShaderFnCompiler {
         }
         false
     }
+    
+    pub(crate) fn handle_scope_object_method_call_args(
+        &mut self,
+        vm: &mut ScriptVm,
+        output: &mut ShaderOutput,
+        opargs: OpcodeArgs,
+        method_id: LiveId,
+        obj: ScriptObject,
+    ) -> bool {
+        // Look up the method on the scope object
+        let fnobj = vm.heap.value(obj, method_id.into(), self.trap.pass());
+        if let Some(fnobj) = fnobj.as_object() {
+            if let Some(fnptr) = vm.heap.as_fn(fnobj) {
+                match fnptr {
+                    ScriptFnPtr::Script(_fnptr) => {
+                        // For ScopeObject methods, we only pass the io_all parameter
+                        // since `self` references are resolved to IoScopeUniform accesses
+                        // at compile time (no runtime _self parameter)
+                        let mut out = self.stack.new_string();
+                        write!(out, "{}", output.backend.get_io_all(output.mode)).ok();
+                        self.mes.push(ShaderMe::ScriptCall {
+                            name: method_id,
+                            out,
+                            fnobj,
+                            sself: ShaderType::ScopeObject(obj),
+                            args: vec![],
+                        });
+                    }
+                    ScriptFnPtr::Native(_) => {
+                        // Native methods on scope objects not supported
+                        script_err_shader!(self.trap, "native methods not supported on scope objects");
+                        return false;
+                    }
+                }
+                self.maybe_pop_to_me(vm, opargs);
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// Handle method call on a scope object identified by name (self_id).
+    /// This is called when PodType handling didn't match - we try to resolve
+    /// the identifier as a scope object and call the method on it.
+    pub(crate) fn handle_scope_object_method_call_by_id(
+        &mut self,
+        vm: &mut ScriptVm,
+        output: &mut ShaderOutput,
+        opargs: OpcodeArgs,
+        method_id: LiveId,
+        self_id: LiveId,
+    ) -> bool {
+        // Look up self_id in script scope
+        let script_value = vm.heap.scope_value(self.script_scope, self_id.into(), NoTrap);
+        if script_value.is_nil() || script_value.is_err() {
+            return false;
+        }
+        
+        // Must be an object
+        let value_obj = match script_value.as_object() {
+            Some(obj) => obj,
+            None => return false,
+        };
+        
+        // Must not be a shader_io type or a function
+        if vm.heap.as_shader_io(value_obj).is_some() || vm.heap.as_fn(value_obj).is_some() {
+            return false;
+        }
+        
+        // It's a scope object - handle the method call
+        self.handle_scope_object_method_call_args(vm, output, opargs, method_id, value_obj)
+    }
+    
+    /// Handle method call on a scope texture identified by name (self_id).
+    /// This is called for expressions like `test_tex.sample(coord)` where `test_tex`
+    /// is a texture defined in the script scope.
+    pub(crate) fn handle_scope_texture_method_call_by_id(
+        &mut self,
+        vm: &mut ScriptVm,
+        output: &mut ShaderOutput,
+        _opargs: OpcodeArgs,
+        method_id: LiveId,
+        self_id: LiveId,
+    ) -> bool {
+        use crate::mod_shader::*;
+        use std::fmt::Write;
+        
+        // Look up self_id in script scope
+        let script_value = vm.heap.scope_value(self.script_scope, self_id.into(), NoTrap);
+        if script_value.is_nil() || script_value.is_err() {
+            return false;
+        }
+        
+        // Must be an object
+        let value_obj = match script_value.as_object() {
+            Some(obj) => obj,
+            None => return false,
+        };
+        
+        // Must be a texture shader_io type
+        let io_type = match vm.heap.as_shader_io(value_obj) {
+            Some(io_type) => io_type,
+            None => return false,
+        };
+        
+        // Check if it's a texture type
+        let tex_type = match io_type {
+            SHADER_IO_TEXTURE_1D => TextureType::Texture1d,
+            SHADER_IO_TEXTURE_1D_ARRAY => TextureType::Texture1dArray,
+            SHADER_IO_TEXTURE_2D => TextureType::Texture2d,
+            SHADER_IO_TEXTURE_2D_ARRAY => TextureType::Texture2dArray,
+            SHADER_IO_TEXTURE_3D => TextureType::Texture3d,
+            SHADER_IO_TEXTURE_3D_ARRAY => TextureType::Texture3dArray,
+            SHADER_IO_TEXTURE_CUBE => TextureType::TextureCube,
+            SHADER_IO_TEXTURE_CUBE_ARRAY => TextureType::TextureCubeArray,
+            SHADER_IO_TEXTURE_DEPTH => TextureType::TextureDepth,
+            SHADER_IO_TEXTURE_DEPTH_ARRAY => TextureType::TextureDepthArray,
+            _ => return false,
+        };
+        
+        // Check if we already have this scope texture registered
+        let existing = output.scope_textures.iter().find(|st| st.obj == value_obj);
+        
+        let shader_name = if let Some(existing) = existing {
+            existing.shader_name
+        } else {
+            // Generate unique name for this scope texture
+            let shader_name = self.generate_scope_texture_name(output, self_id, value_obj);
+            
+            // Add to scope_textures for runtime tracking
+            output.scope_textures.push(ScopeTextureSource {
+                obj: value_obj,
+                tex_type,
+                shader_name,
+            });
+            
+            // Add to IO list as Texture
+            if !output.io.iter().any(|io| io.name == shader_name && matches!(io.kind, ShaderIoKind::Texture(_))) {
+                output.io.push(ShaderIo {
+                    kind: ShaderIoKind::Texture(tex_type),
+                    name: shader_name,
+                    ty: ScriptPodType::VOID, // Textures don't have a pod type
+                    buffer_index: None,
+                });
+            }
+            
+            shader_name
+        };
+        
+        // Generate the texture expression with proper prefix
+        let mut texture_expr = self.stack.new_string();
+        let (_, prefix) = output.backend.get_shader_io_kind_and_prefix(output.mode, io_type);
+        match prefix {
+            ShaderIoPrefix::Prefix(prefix) => write!(texture_expr, "{}{}", prefix, shader_name).ok(),
+            ShaderIoPrefix::Full(full) => write!(texture_expr, "{}", full).ok(),
+            ShaderIoPrefix::FullOwned(full) => write!(texture_expr, "{}", full).ok(),
+        };
+        
+        // Push TextureBuiltin ME to handle the method call
+        self.mes.push(ShaderMe::TextureBuiltin {
+            method_id,
+            tex_type,
+            texture_expr,
+            args: vec![],
+        });
+        
+        true
+    }
 
     pub(crate) fn handle_pod_method_call_args(
         &mut self,
@@ -826,8 +1108,24 @@ impl ShaderFnCompiler {
         self_s_slice: &str,
         self_s: &String,
     ) -> bool {
+        // First check for known shader builtin methods (mix, clamp, etc.)
+        // These translate to builtin shader functions: x.mix(y, a) -> mix(x, y, a)
+        if Self::is_pod_builtin_method(method_id) {
+            let mut self_arg = self.stack.new_string();
+            write!(self_arg, "{}", self_s_slice).ok();
+            self.mes.push(ShaderMe::PodBuiltinMethod {
+                name: method_id,
+                self_ty: pod_ty,
+                args: vec![(ShaderType::Pod(pod_ty), self_arg)],
+            });
+            self.stack.free_string(self_s.clone());
+            self.maybe_pop_to_me(vm, opargs);
+            return true;
+        }
+        
+        // Look up method on the pod type's object (use NoTrap to avoid error messages)
         let pod_ty_data = &vm.heap.pod_types[pod_ty.index as usize];
-        let fnobj = vm.heap.value(pod_ty_data.object, method_id.into(), &self.trap);
+        let fnobj = vm.heap.value(pod_ty_data.object, method_id.into(), NoTrap);
 
         if let Some(fnobj) = fnobj.as_object() {
             if let Some(fnptr) = vm.heap.as_fn(fnobj) {
@@ -881,7 +1179,18 @@ impl ShaderFnCompiler {
                 return true;
             }
         }
+        
         false
+    }
+    
+    /// Check if a method name is a known shader builtin that can be called on pod types
+    fn is_pod_builtin_method(method_id: LiveId) -> bool {
+        method_id == id!(mix) || 
+        method_id == id!(clamp) || 
+        method_id == id!(smoothstep) || 
+        method_id == id!(step) || 
+        method_id == id!(min) || 
+        method_id == id!(max)
     }
 
     pub(crate) fn handle_pod_type_method_call_args(
@@ -893,12 +1202,12 @@ impl ShaderFnCompiler {
         self_id: LiveId,
         self_s: &String,
     ) -> bool {
-        let value = vm.heap.scope_value(self.script_scope, self_id.into(), &self.trap);
+        let value = vm.heap.scope_value(self.script_scope, self_id.into(), self.trap.pass());
         if let Some(pod_ty) = vm.heap.pod_type(value) {
             self.ensure_struct_name(vm, output, pod_ty, self_id);
             // It is a PodType. Look up static method.
             let pod_ty_data = &vm.heap.pod_types[pod_ty.index as usize];
-            let fnobj = vm.heap.value(pod_ty_data.object, method_id.into(), &self.trap);
+            let fnobj = vm.heap.value(pod_ty_data.object, method_id.into(), self.trap.pass());
 
             if let Some(fnobj) = fnobj.as_object() {
                 if let Some(fnptr) = vm.heap.as_fn(fnobj) {

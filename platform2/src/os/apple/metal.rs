@@ -21,7 +21,7 @@ use {
         },
         draw_list::DrawListId,
         draw_vars::DrawVars,
-        draw_shader::{CxDrawShader, CxDrawShaderMapping, CxDrawShaderSource, DrawShaderId},
+        draw_shader::{CxDrawShader, CxDrawShaderMapping, CxDrawShaderCode, DrawShaderId},
         geometry::Geometry,
         cx::Cx,
         draw_pass::{DrawPassClearColor, DrawPassClearDepth, DrawPassId},
@@ -141,6 +141,9 @@ impl Cx {
                     geometry.dirty = false;
                 }
                 
+                // Uncomment to enable draw call debug output:
+                //Self::_debug_call_info(sh, draw_item.instances.as_ref().unwrap(), draw_call, instances, geometry);
+                
                 if let Some(inner) = geometry.os.vertex_buffer.get().cpu_read().inner.as_ref() {
                     unsafe {msg_send![
                         encoder,
@@ -193,6 +196,13 @@ impl Cx {
                     if let Some(id) = shp.dyn_uniform_buffer_id {
                         let () = msg_send![encoder, setVertexBytes: draw_call.dyn_uniforms.as_ptr() as *const std::ffi::c_void length: (draw_call.dyn_uniforms.len() * 4) as u64 atIndex: id];
                         let () = msg_send![encoder, setFragmentBytes: draw_call.dyn_uniforms.as_ptr() as *const std::ffi::c_void length: (draw_call.dyn_uniforms.len() * 4) as u64 atIndex: id];
+                    }
+                    if let Some(id) = shp.scope_uniform_buffer_id {
+                        let scope_buf = &sh.mapping.scope_uniforms_buf;
+                        if !scope_buf.is_empty() {
+                            let () = msg_send![encoder, setVertexBytes: scope_buf.as_ptr() as *const std::ffi::c_void length: (scope_buf.len() * 4) as u64 atIndex: id];
+                            let () = msg_send![encoder, setFragmentBytes: scope_buf.as_ptr() as *const std::ffi::c_void length: (scope_buf.len() * 4) as u64 atIndex: id];
+                        }
                     }
                     /*
                     let ct = &sh.mapping.const_table.table;
@@ -267,6 +277,84 @@ impl Cx {
                 gpu_read_guards.push(geometry.os.index_buffer.get().gpu_read());
             }
         }
+    }
+    
+    /// Debug helper for printing draw call info. Uncomment the call in render_view to enable.
+    #[allow(dead_code)]
+    fn _debug_call_info(
+        sh: &CxDrawShader,
+        instance_data: &[f32],
+        draw_call: &crate::draw_list::CxDrawCall,
+        instances: u64,
+        geometry: &crate::geometry::CxGeometry,
+    ) {
+        let total_slots = sh.mapping.instances.total_slots;
+        
+        println!("=== METAL DRAW CALL DEBUG ===");
+        println!("  shader debug_id: {:?}", sh.debug_id);
+        println!("  instance_count: {}", instances);
+        println!("  total_slots per instance: {}", total_slots);
+        println!("  instance_data.len(): {} floats", instance_data.len());
+        
+        // Print instance layout (all instance fields: dyn + rust)
+        println!("  --- Instance Layout ({} inputs, {} total_slots) ---", sh.mapping.instances.inputs.len(), sh.mapping.instances.total_slots);
+        for input in &sh.mapping.instances.inputs {
+            println!("    {:?}: offset={}, slots={}", input.id, input.offset, input.slots);
+        }
+        
+        // Print dyn_instances layout (just the dynamic portion)
+        if !sh.mapping.dyn_instances.inputs.is_empty() {
+            println!("  --- Dyn Instance Layout ({} inputs, {} total_slots) ---", sh.mapping.dyn_instances.inputs.len(), sh.mapping.dyn_instances.total_slots);
+            for input in &sh.mapping.dyn_instances.inputs {
+                println!("    {:?}: offset={}, slots={}", input.id, input.offset, input.slots);
+            }
+        }
+        
+        // Print first few instances with named values
+        let num_instances_to_print = 3.min(instances as usize);
+        for inst_idx in 0..num_instances_to_print {
+            let base = inst_idx * total_slots;
+            if base + total_slots <= instance_data.len() {
+                println!("  --- Instance {} ---", inst_idx);
+                for input in &sh.mapping.instances.inputs {
+                    let start = base + input.offset;
+                    let end = start + input.slots;
+                    if end <= instance_data.len() {
+                        let values = &instance_data[start..end];
+                        println!("    {:?}: {:?}", input.id, values);
+                    }
+                }
+            }
+        }
+        if instances > 3 {
+            println!("  ... ({} more instances)", instances - 3);
+        }
+        
+        // Print uniform info
+        let draw_call_uniforms = draw_call.draw_call_uniforms.as_slice();
+        println!("    dyn_uniforms ({} floats): {:?}", draw_call.dyn_uniforms.len(), &draw_call.dyn_uniforms[..draw_call.dyn_uniforms.len().min(8)]);
+        println!("    draw_call_uniforms ({} floats): {:?}", draw_call_uniforms.len(), draw_call_uniforms);
+        
+        // Print texture info
+        println!("    texture_slots count: {}", sh.mapping.textures.len());
+        for (i, slot) in draw_call.texture_slots.iter().enumerate() {
+            if let Some(texture) = slot {
+                println!("    texture[{}]: Some(id={})", i, texture.texture_id().0);
+            } else {
+                println!("    texture[{}]: None", i);
+            }
+        }
+        
+        // Print geometry info
+        println!(">>> METAL drawIndexedPrimitives:");
+        println!("    indexCount: {}", geometry.indices.len());
+        println!("    instanceCount: {}", instances);
+        println!("    geometry vertices: {}", geometry.vertices.len());
+        if !geometry.vertices.is_empty() {
+            let num_verts = 12.min(geometry.vertices.len());
+            println!("    first {} vertex floats: {:?}", num_verts, &geometry.vertices[..num_verts]);
+        }
+        println!("=============================");
     }
     
     pub fn draw_pass(
@@ -619,9 +707,9 @@ impl Cx {
         for draw_shader_id in self.draw_shaders.compile_set.iter().cloned().collect::<Vec<_>>() {
             let cx_shader = &self.draw_shaders.shaders[draw_shader_id];
             
-            let mtlsl = match &cx_shader.mapping.source {
-                CxDrawShaderSource::Combined { source } => source.clone(),
-                CxDrawShaderSource::Separate { .. } => {
+            let mtlsl = match &cx_shader.mapping.code {
+                CxDrawShaderCode::Combined { code } => code.clone(),
+                CxDrawShaderCode::Separate { .. } => {
                     crate::error!("Metal does not support separate vertex/fragment sources");
                     continue;
                 }
@@ -752,41 +840,78 @@ pub struct CxOsDrawShader {
     pass_uniform_buffer_id: Option<u64>,
     draw_list_uniform_buffer_id: Option<u64>,
     dyn_uniform_buffer_id: Option<u64>,
+    scope_uniform_buffer_id: Option<u64>,
     pub mtlsl: String,
 }
 
 // alright lets go process this shader
 impl DrawVars{
-    pub (crate) fn compile_shader(&mut self, vm:&mut ScriptVm, _apply:&mut ApplyScope, value:ScriptValue){
-        // alright lets compile a metal shader
+    pub (crate) fn compile_shader(&mut self, vm:&mut ScriptVm, _apply:&Apply, value:ScriptValue){
+        // Shader caching strategy:
+        // 1. Check object_id cache (fastest - exact same object)
+        // 2. Check function hash cache (same functions even if different object instance)
+        // 3. Check code cache (different functions but identical generated code)
+        
         if let Some(io_self) = value.as_object(){
+            // Cache 1: Check if this exact object has been compiled before
+            {
+                let cx = vm.host.cx();
+                if let Some(&shader_id) = cx.draw_shaders.cache_object_id_to_shader.get(&io_self) {
+                    self.finalize_cached_shader(vm, shader_id);
+                    return;
+                }
+            }
+            
+            // Cache 2: Compute function hash and check if we've seen these functions before
+            let fnhash = DrawVars::compute_shader_functions_hash(&vm.heap, io_self);
+            {
+                let cx = vm.host.cx();
+                if let Some(&shader_id) = cx.draw_shaders.cache_functions_to_shader.get(&fnhash) {
+                    // Add to object_id cache for faster lookup next time
+                    let cx = vm.host.cx_mut();
+                    cx.draw_shaders.cache_object_id_to_shader.insert(io_self, shader_id);
+                    self.finalize_cached_shader(vm, shader_id);
+                    return;
+                }
+            }
+            
+            // Not in function cache, need to compile
             let mut output = ShaderOutput::default();
             output.backend = ShaderBackend::Metal;
                                     
             output.pre_collect_rust_instance_io(vm, io_self);
-            output.pre_collect_fragment_outputs(vm, io_self);
+            output.pre_collect_shader_io(vm, io_self);
             
-            if let Some(fnobj) = vm.heap.object_method(io_self, id!(vertex).into(), &vm.thread.trap).as_object(){
+            if let Some(fnobj) = vm.heap.object_method(io_self, id!(vertex).into(), vm.thread.trap.pass()).as_object(){
                 output.mode = ShaderMode::Vertex;
+                // Entry point shaders don't have script-level arguments to validate, use NoTrap
                 ShaderFnCompiler::compile_shader_def(
                     vm, 
                     &mut output, 
+                    NoTrap,
                     id!(vertex), 
                     fnobj, 
                     ShaderType::IoSelf(io_self), 
                     vec![],
                 );
             }
-            if let Some(fnobj) = vm.heap.object_method(io_self, id!(fragment).into(), &vm.thread.trap).as_object(){
+            if let Some(fnobj) = vm.heap.object_method(io_self, id!(fragment).into(), vm.thread.trap.pass()).as_object(){
                 output.mode = ShaderMode::Fragment;
+                // Entry point shaders don't have script-level arguments to validate, use NoTrap
                 ShaderFnCompiler::compile_shader_def(
                     vm, 
                     &mut output, 
+                    NoTrap,
                     id!(fragment), 
                     fnobj, 
                     ShaderType::IoSelf(io_self), 
                     vec![],
                 );
+            }
+            
+            // Don't proceed if shader compilation had errors
+            if output.has_errors {
+                return;
             }
             
             // Assign buffer indices to uniform buffers before generating Metal code
@@ -798,6 +923,7 @@ impl DrawVars{
             output.create_struct_defs(vm, &mut out);
             output.metal_create_instance_struct(vm, &mut out);
             output.metal_create_uniform_struct(vm, &mut out);
+            output.metal_create_scope_uniform_struct(vm, &mut out);
             output.metal_create_varying_struct(vm, &mut out);
             output.metal_create_vertex_buffer_struct(vm, &mut out);
             output.metal_create_io_struct(vm, &mut out);
@@ -809,12 +935,46 @@ impl DrawVars{
             output.metal_create_vertex_fn(vm, &mut out);
             output.metal_create_fragment_main_fn(vm, &mut out);
             
+            let source = vm.heap.new_object_ref(io_self);
+            
             // Create the shader mapping and allocate CxDrawShader
-            let source = CxDrawShaderSource::Combined { source: out };
-            let mut mapping = CxDrawShaderMapping::from_shader_output(source, &vm.heap, &output);
+            let code = CxDrawShaderCode::Combined { code: out };
+            
+            // Cache 3: Check if this exact code has been compiled before
+            {
+                let cx = vm.host.cx();
+                if let Some(&shader_id) = cx.draw_shaders.cache_code_to_shader.get(&code) {
+                    // Add to both object_id and function hash caches
+                    let cx = vm.host.cx_mut();
+                    cx.draw_shaders.cache_object_id_to_shader.insert(io_self, shader_id);
+                    cx.draw_shaders.cache_functions_to_shader.insert(fnhash, shader_id);
+                    self.finalize_cached_shader(vm, shader_id);
+                    return;
+                }
+            }
+            
+            // Extract geometry_id from the vertex buffer object before creating the mapping
+            let geometry_id = if let Some(vb_obj) = output.find_vertex_buffer_object(vm, io_self) {
+                let buffer_value = vm.heap.value(vb_obj, id!(buffer).into(), vm.thread.trap.pass());
+                if let Some(handle) = buffer_value.as_handle() {
+                    vm.heap.handle_ref::<Geometry>(handle).map(|g| g.geometry_id())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            let mut mapping = CxDrawShaderMapping::from_shader_output(source, code.clone(), &vm.heap, &output, geometry_id);
+            
+            // Fill the scope uniform buffer from current script values
+            mapping.fill_scope_uniforms_buffer(
+                &vm.heap,
+                &vm.thread.trap.pass(),
+            );
             
             // Check for debug: true on the shader object
-            let debug_value = vm.heap.value(io_self, id!(debug).into(), &vm.thread.trap);
+            let debug_value = vm.heap.value(io_self, id!(debug).into(), vm.thread.trap.pass());
             if let Some(true) = debug_value.as_bool() {
                 mapping.flags.debug = true;
             }
@@ -822,9 +982,6 @@ impl DrawVars{
             // Set dyn_instance_start and dyn_instance_slots based on mapping
             self.dyn_instance_start = self.dyn_instances.len() - mapping.dyn_instances.total_slots;
             self.dyn_instance_slots = mapping.instances.total_slots;
-            
-            // Read default values for dyn_instance slots from the shader object
-            self.read_dyn_instance_defaults(&vm.heap, &mapping, io_self);
             
             // Access Cx from the vm host
             let cx = vm.host.cx_mut();
@@ -837,26 +994,22 @@ impl DrawVars{
                 mapping,
             });
             
+            // Create the shader ID
+            let shader_id = DrawShaderId { index };
+            
+            // Add to all caches
+            cx.draw_shaders.cache_object_id_to_shader.insert(io_self, shader_id);
+            cx.draw_shaders.cache_functions_to_shader.insert(fnhash, shader_id);
+            cx.draw_shaders.cache_code_to_shader.insert(code, shader_id);
+            
             // Add to compile set for later Metal compilation
             cx.draw_shaders.compile_set.insert(index);
             
             // Set draw_shader on self
-            self.draw_shader_id = Some(DrawShaderId {
-                generation: cx.draw_shaders.generation,
-                index,
-            });
+            self.draw_shader_id = Some(shader_id);
             
-            // See if we have a script-set vertex buffer with geometry
-            // Find the vertex buffer object by looking for SHADER_IO_VERTEX_BUFFER type,
-            // then get its buffer property which should be a Handle<Geometry>
-            if let Some(vb_obj) = output.find_vertex_buffer_object(vm, io_self) {
-                let buffer_value = vm.heap.value(vb_obj, id!(buffer).into(), &vm.thread.trap);
-                if let Some(handle) = buffer_value.as_handle() {
-                    if let Some(geometry) = vm.heap.handle_ref::<Geometry>(handle) {
-                        self.geometry_id = Some(geometry.geometry_id());
-                    }
-                }
-            }
+            // Use the geometry_id stored on the mapping
+            self.geometry_id = geometry_id;
         }
     }
 }
@@ -937,6 +1090,8 @@ impl CxOsDrawShader {
         let draw_list_uniform_buffer_id = bindings.get_by_type_name(id!(DrawListUniforms)).map(|i| i as u64);
         // dyn_uniform_buffer_id is not in bindings, it uses the IoUniform struct at buffer(2)
         let dyn_uniform_buffer_id = Some(2);
+        // scope_uniform_buffer_id comes from bindings if there are scope uniforms
+        let scope_uniform_buffer_id = bindings.scope_uniform_buffer_index.map(|i| i as u64);
         
         return Some(Self {
             _library: library,
@@ -945,6 +1100,7 @@ impl CxOsDrawShader {
             pass_uniform_buffer_id,
             draw_list_uniform_buffer_id,
             dyn_uniform_buffer_id,
+            scope_uniform_buffer_id,
             mtlsl,
         });
     }

@@ -1,4 +1,5 @@
 use crate::value::*;
+use crate::suggest::format_value_type;
 use crate::*;
 use crate::trap::*;
 
@@ -69,7 +70,7 @@ impl ScriptHeap{
         }
     }   
     
-    pub fn unnamed_fn_arg(&mut self, top_ptr:ScriptObject, value:ScriptValue, trap:&ScriptTrap)->ScriptValue{
+    pub fn unnamed_fn_arg(&mut self, top_ptr:ScriptObject, value:ScriptValue, trap:ScriptTrap)->ScriptValue{
         let object = &self.objects[top_ptr.index as usize];
                 
         // which arg number?
@@ -81,7 +82,7 @@ impl ScriptHeap{
                 let key = kv.key;
                 if let Some(def) = object.vec.get(index){
                     if !def.value.is_nil() && def.value.value_type().to_redux() != value.value_type().to_redux(){
-                        return trap.err_invalid_arg_type()
+                        return script_err_type_mismatch!(trap, "arg {} type mismatch: expected {}, got {}", index, format_value_type(self, def.value), format_value_type(self, value))
                     }
                 }
                 self.objects[top_ptr.index as usize].map_insert(key, value);
@@ -97,7 +98,7 @@ impl ScriptHeap{
         return NIL
     }
         
-    pub fn named_fn_arg(&mut self, top_ptr:ScriptObject, key:ScriptValue, value:ScriptValue, trap:&ScriptTrap)->ScriptValue{
+    pub fn named_fn_arg(&mut self, top_ptr:ScriptObject, key:ScriptValue, value:ScriptValue, trap:ScriptTrap)->ScriptValue{
         let object = &self.objects[top_ptr.index as usize];
                     
         if let Some(ptr) = object.proto.as_object(){
@@ -105,18 +106,18 @@ impl ScriptHeap{
             for kv in object.vec.iter(){
                 if kv.key == key{
                     if !kv.value.is_nil() && kv.value.value_type().to_redux() != value.value_type().to_redux(){
-                        return trap.err_invalid_arg_type()
+                        return script_err_type_mismatch!(trap, "named arg {:?} type mismatch: expected {}, got {}", key, format_value_type(self, kv.value), format_value_type(self, value))
                     }
                     self.objects[top_ptr.index as usize].map_insert(key, value);
                     return NIL    
                 }
             }
-            return trap.err_invalid_arg_name() 
+            return script_err_not_found!(trap, "unknown named arg {:?}", key) 
         }
-        trap.err_unexpected()
+        script_err_unexpected!(trap, "named_fn_arg called without prototype object")
     }
         
-    pub fn push_all_fn_args(&mut self, top_ptr:ScriptObject, args:&[ScriptValue], trap:&ScriptTrap)->ScriptValue{
+    pub fn push_all_fn_args(&mut self, top_ptr:ScriptObject, args:&[ScriptValue], trap:ScriptTrap)->ScriptValue{
         let object = &self.objects[top_ptr.index as usize];
         if let Some(ptr) = object.proto.as_object(){
             for (index, value) in args.iter().enumerate(){
@@ -126,7 +127,7 @@ impl ScriptHeap{
                     // typecheck against default arg
                     if let Some(def) = object.vec.get(index){
                         if !def.value.is_nil() && def.value.value_type().to_redux() != value.value_type().to_redux(){
-                            return trap.err_invalid_arg_type()
+                            return script_err_type_mismatch!(trap, "arg {} ({:?}) type mismatch: expected {}, got {}", index, key, format_value_type(self, def.value), format_value_type(self, *value))
                         }
                     }
                     self.objects[top_ptr.index as usize].map_insert(key, *value);
@@ -141,6 +142,6 @@ impl ScriptHeap{
             }
             return NIL
         }
-        trap.err_unexpected()
+        script_err_unexpected!(trap, "push_all_fn_args called without prototype object")
     }
 }

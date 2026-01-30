@@ -82,9 +82,10 @@ script_mod!{
             }
             
             random_2d: fn(v: vec2)->float {
-            return fract(sin(dot(v.xy, vec2(12.9898,78.233))) * 43758.5453);
+                return fract(sin(dot(v.xy, vec2(12.9898,78.233))) * 43758.5453);
             }
         }
+        let Math = me.Math
         
         Pal:{
             
@@ -247,7 +248,8 @@ script_mod!{
             
             stroke: fn(color: vec4, width: float) -> vec4 {
                 self.stroke_keep(color, width);
-                self.old_shape = self.shape = 1e+20;
+                self.old_shape = 1e+20;
+                self.shape = 1e+20;
                 self.clip = -1e+20;
                 self.has_clip = 0.;
                 return self.result;

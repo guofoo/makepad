@@ -98,7 +98,7 @@ impl Cx{
     }
 }
 
-pub fn define_run_module(vm:&mut ScriptVm){
+pub fn script_mod(vm:&mut ScriptVm){
     let run = vm.new_module(id_lut!(run));
     
     set_script_value_to_api!(vm, run.ChildEvents);
@@ -111,7 +111,7 @@ pub fn define_run_module(vm:&mut ScriptVm){
                 
         if !script_has_proto!(vm, cmd, run.ChildCmd) || 
             !script_has_proto!(vm, events, run.ChildEvents){
-            return vm.thread.trap.err_invalid_arg_type()
+            return script_err_type_mismatch!(vm.thread.trap.pass(), "invalid run arg type")
         }
         
         let cmd = ChildCmd::script_from_value(vm, cmd);
@@ -150,7 +150,7 @@ pub fn define_run_module(vm:&mut ScriptVm){
             }
             Err(_e)=>{
                
-                vm.thread.trap.err_child_process()
+                script_err_io!(vm.thread.trap.pass(), "child process error")
             }
         }
     });

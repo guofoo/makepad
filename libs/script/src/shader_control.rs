@@ -9,6 +9,7 @@ use crate::vm::*;
 use crate::opcode::*;
 use crate::shader::*;
 use crate::shader_tables::*;
+use crate::*;
 
 impl ShaderFnCompiler {
     /// Check if we're currently in unreachable code (after a return in the current branch)
@@ -64,28 +65,73 @@ impl ShaderFnCompiler {
                 let both_returned = *if_branch_returned && *has_return;
 
                 if self.stack.types.len() > *stack_depth {
-                    let (ty, val) = self.stack.pop(&self.trap);
-                    if let Some(phi) = phi {
+                    // Else branch has a value on the stack
+                    let (ty, val) = self.stack.pop(self.trap.pass());
+                    
+                    // Check if the else value is void
+                    let else_concrete = ty.make_concrete(&vm.code.builtins.pod);
+                    let else_is_void = else_concrete.map(|t| t == vm.code.builtins.pod.pod_void).unwrap_or(false);
+                    
+                    if else_is_void {
+                        // Emit void value as statement
+                        if !val.is_empty() {
+                            self.out.push_str(&val);
+                            self.out.push_str(";\n");
+                        }
+                    } else if let Some(phi) = phi {
                         if let Some(phi_type) = phi_type {
-                            self.out.push_str(&format!("{} = {};\n", phi, val));
                             // declare the phi at start
-                            let ty = type_table_if_else(phi_type, &ty, &self.trap, &vm.code.builtins.pod);
+                            let ty = type_table_if_else(phi_type, &ty, self.trap.pass(), &vm.code.builtins.pod);
                             let ty = ty.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+                            
+                            // Skip phi handling if type is void
+                            if ty != vm.code.builtins.pod.pod_void {
+                                self.out.push_str(&format!("{} = {};\n", phi, val));
+                                let ty_name = if let Some(name) = vm.heap.pod_type_name(ty) {
+                                    output.backend.map_pod_name(name)
+                                } else {
+                                    id!(unknown)
+                                };
+                                // Generate backend-appropriate variable declaration
+                                let mut s = self.stack.new_string();
+                                output.backend.write_var_decl(&mut s, ty_name, phi);
+                                self.out.insert_str(*start_pos, &s);
+                                self.stack.free_string(s);
+                                let mut s = self.stack.new_string();
+                                write!(s, "{}", phi).ok();
+                                self.stack.push(self.trap.pass(), ShaderType::Pod(ty), s);
+                            }
+                        }
+                    }
+                    self.stack.free_string(val);
+                } else if let Some(phi) = phi {
+                    // If branch had a value (created phi) but else branch has no value.
+                    // The phi assignment was already written in handle_if_else, so we must
+                    // declare the phi variable to make the shader code valid.
+                    // However, since only one branch has a value, we can't use this as
+                    // an expression result, so we don't push it onto the stack.
+                    if let Some(phi_type) = phi_type {
+                        let ty = phi_type.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+                        
+                        // Skip phi handling if type is void
+                        if ty != vm.code.builtins.pod.pod_void {
                             let ty_name = if let Some(name) = vm.heap.pod_type_name(ty) {
                                 output.backend.map_pod_name(name)
                             } else {
                                 id!(unknown)
                             };
+                            // Generate backend-appropriate variable declaration
                             let mut s = self.stack.new_string();
-                            write!(s, "let {phi}:{ty_name};\n").ok();
+                            output.backend.write_var_decl(&mut s, ty_name, phi);
                             self.out.insert_str(*start_pos, &s);
                             self.stack.free_string(s);
-                            let mut s = self.stack.new_string();
-                            write!(s, "{}", phi).ok();
-                            self.stack.push(&self.trap, ShaderType::Pod(ty), s);
                         }
                     }
-                    self.stack.free_string(val);
+                } else if *has_return {
+                    // If branch had a return with no else branch and no phi value.
+                    // The following POP_TO_ME opcode expects a value but there isn't one.
+                    // Skip it to avoid stack underflow.
+                    self.skip_next_pop_to_me = true;
                 }
                 self.out.push_str("}\n");
                 self.shader_scope.exit_scope();
@@ -111,7 +157,7 @@ impl ShaderFnCompiler {
     }
 
     pub(crate) fn handle_if_test(&mut self, opargs: OpcodeArgs) {
-        let (_ty, val) = self.stack.pop(&self.trap);
+        let (_ty, val) = self.stack.pop(self.trap.pass());
         let start_pos = self.out.len();
         self.out.push_str("if(");
         self.out.push_str(&val);
@@ -146,7 +192,7 @@ impl ShaderFnCompiler {
         });
     }
 
-    pub(crate) fn handle_if_else(&mut self, opargs: OpcodeArgs) {
+    pub(crate) fn handle_if_else(&mut self, vm: &ScriptVm, opargs: OpcodeArgs) {
         if let Some(ShaderMe::IfBody {
             target_ip,
             start_pos,
@@ -158,16 +204,28 @@ impl ShaderFnCompiler {
         }) = self.mes.last_mut()
         {
             if self.stack.types.len() > *stack_depth {
-                let (ty, val) = self.stack.pop(&self.trap);
-                *phi_type = Some(ty);
-                let phi_name = if let Some(p) = phi {
-                    p.clone()
+                let (ty, val) = self.stack.pop(self.trap.pass());
+                // Check if the type is void - if so, don't create a phi, just emit as statement
+                let concrete_ty = ty.make_concrete(&vm.code.builtins.pod);
+                let is_void = concrete_ty.map(|t| t == vm.code.builtins.pod.pod_void).unwrap_or(false);
+                
+                if is_void {
+                    // Emit as statement without phi assignment
+                    if !val.is_empty() {
+                        self.out.push_str(&val);
+                        self.out.push_str(";\n");
+                    }
                 } else {
-                    let s = format!("_phi_{}", start_pos);
-                    *phi = Some(s.clone());
-                    s
-                };
-                self.out.push_str(&format!("{} = {};\n", phi_name, val));
+                    *phi_type = Some(ty);
+                    let phi_name = if let Some(p) = phi {
+                        p.clone()
+                    } else {
+                        let s = format!("_phi_{}", start_pos);
+                        *phi = Some(s.clone());
+                        s
+                    };
+                    self.out.push_str(&format!("{} = {};\n", phi_name, val));
+                }
                 self.stack.free_string(val);
             }
             self.out.push_str("}\nelse{\n");
@@ -178,7 +236,7 @@ impl ShaderFnCompiler {
             *if_branch_returned = *has_return;
             *has_return = false;
         } else {
-            self.trap.err_unexpected();
+            script_err_unexpected!(self.trap, "unexpected in shader control");
         }
     }
 
@@ -199,11 +257,15 @@ impl ShaderFnCompiler {
         }
     }
 
-    /// Handle if/else phi when in unreachable code - just close the structure
+    /// Handle if/else phi when in unreachable code - close the structure properly
     pub(crate) fn handle_if_else_phi_unreachable(&mut self) {
         if let Some(ShaderMe::IfBody { target_ip, has_return, if_branch_returned, .. }) = self.mes.last() {
             if self.trap.ip.index >= *target_ip {
                 let both_returned = *if_branch_returned && *has_return;
+                
+                // Still need to close the if block in generated code and exit scope
+                self.out.push_str("}\n");
+                self.shader_scope.exit_scope();
                 self.mes.pop();
 
                 // If both branches returned, propagate up
@@ -224,7 +286,7 @@ impl ShaderFnCompiler {
         }
     }
 
-    pub(crate) fn handle_return(&mut self, vm: &mut ScriptVm, opargs: OpcodeArgs) {
+    pub(crate) fn handle_return(&mut self, vm: &mut ScriptVm, output: &mut ShaderOutput, opargs: OpcodeArgs) {
         // Check if we're already escaped (all code paths have returned)
         let already_escaped = self.mes.iter().rev()
             .find_map(|me| match me {
@@ -236,7 +298,7 @@ impl ShaderFnCompiler {
         if already_escaped {
             // Still need to consume the stack value if present
             if !opargs.is_nil() {
-                let (_ty, s) = self.stack.pop(&self.trap);
+                let (_ty, s) = self.stack.pop(self.trap.pass());
                 self.stack.free_string(s);
             }
             return;
@@ -245,20 +307,22 @@ impl ShaderFnCompiler {
         // Check if we're inside an IfBody before taking mutable borrow
         let inside_if = self.mes.iter().any(|me| matches!(me, ShaderMe::IfBody { .. }));
 
+        // Pop and resolve the return value BEFORE borrowing self.mes mutably
+        // Use pop_resolved to resolve Id types (like variable names) to their actual Pod types
+        let (ty, s) = if opargs.is_nil() {
+            (vm.code.builtins.pod.pod_void, self.stack.new_string())
+        } else {
+            let (ty, s) = self.pop_resolved(vm, output);
+            let ty = ty.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+            (ty, s)
+        };
+
         // Find our FnBody to record return type
         if let Some(me) = self.mes.iter_mut().rev().find(|v| matches!(v, ShaderMe::FnBody { .. })) {
             if let ShaderMe::FnBody { ret, escaped } = me {
-                // we can also return a void
-                let (ty, s) = if opargs.is_nil() {
-                    (vm.code.builtins.pod.pod_void, self.stack.new_string())
-                } else {
-                    let (ty, s) = self.stack.pop(&self.trap);
-                    let ty = ty.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
-                    (ty, s)
-                };
                 if let Some(ret) = ret {
                     if ty != *ret {
-                        self.trap.err_return_type_changed();
+                        script_err_inconsistent!(self.trap, "return type changed");
                     }
                 }
                 *ret = Some(ty);
@@ -272,14 +336,14 @@ impl ShaderFnCompiler {
                     self.out.push_str(";\n");
                 }
 
-                self.stack.free_string(s);
-
                 // If not inside an IfBody (return at function level), mark function as escaped
                 if !inside_if {
                     *escaped = true;
                 }
             }
         }
+
+        self.stack.free_string(s);
 
         // Mark the innermost IfBody as having a return
         if let Some(me) = self.mes.iter_mut().rev().find(|v| matches!(v, ShaderMe::IfBody { .. })) {
@@ -297,8 +361,8 @@ impl ShaderFnCompiler {
     }
 
     pub(crate) fn handle_for_1(&mut self) {
-        let (source, _) = self.stack.pop(&self.trap);
-        let (val_id, _) = self.stack.pop(&self.trap);
+        let (source, _) = self.stack.pop(self.trap.pass());
+        let (val_id, _) = self.stack.pop(self.trap.pass());
         if let ShaderType::Range { start, end, ty } = source {
             if let ShaderType::Id(id) = val_id {
                 self.shader_scope.enter_scope();
@@ -306,10 +370,10 @@ impl ShaderFnCompiler {
                 write!(self.out, "for(var {0} = {1}; {0} < {2}; {0}++){{\n", id, start, end).ok();
                 self.mes.push(ShaderMe::ForLoop { var_id: id });
             } else {
-                self.trap.err_unexpected();
+                script_err_unexpected!(self.trap, "unexpected in shader control");
             }
         } else {
-            self.trap.err_unexpected();
+            script_err_unexpected!(self.trap, "unexpected in shader control");
         }
     }
 
@@ -319,28 +383,42 @@ impl ShaderFnCompiler {
                 self.out.push_str("}\n");
                 self.shader_scope.exit_scope();
             } else {
-                self.trap.err_unexpected();
+                script_err_unexpected!(self.trap, "unexpected in shader control");
             }
         } else {
-            self.trap.err_unexpected();
+            script_err_unexpected!(self.trap, "unexpected in shader control");
         }
     }
 
     pub(crate) fn handle_range(&mut self, vm: &mut ScriptVm) {
-        let (_end_ty, end_s) = self.stack.pop(&self.trap);
-        let (start_ty, start_s) = self.stack.pop(&self.trap);
-        if let Some(ty) = start_ty.make_concrete(&vm.code.builtins.pod) {
+        let (end_ty, end_s) = self.stack.pop(self.trap.pass());
+        let (start_ty, start_s) = self.stack.pop(self.trap.pass());
+        // Validate that both operands can be made into concrete numeric types
+        let start_concrete = start_ty.make_concrete(&vm.code.builtins.pod);
+        let end_concrete = end_ty.make_concrete(&vm.code.builtins.pod);
+        if let (Some(start_pod), Some(end_pod)) = (start_concrete, end_concrete) {
+            // Check that both are numeric types
+            let start_is_number = vm.heap.pod_type_ref(start_pod).ty.is_number();
+            let end_is_number = vm.heap.pod_type_ref(end_pod).ty.is_number();
+            if !start_is_number || !end_is_number {
+                self.stack.free_string(start_s);
+                self.stack.free_string(end_s);
+                script_err_type_mismatch!(self.trap, "range requires numbers");
+                return;
+            }
             self.stack.push(
-                &self.trap,
+                self.trap.pass(),
                 ShaderType::Range {
                     start: start_s,
                     end: end_s,
-                    ty,
+                    ty: start_pod,
                 },
                 String::new(),
             );
         } else {
-            self.trap.err_no_matching_shader_type();
+            self.stack.free_string(start_s);
+            self.stack.free_string(end_s);
+            script_err_type_mismatch!(self.trap, "range requires numbers");
         }
     }
 }

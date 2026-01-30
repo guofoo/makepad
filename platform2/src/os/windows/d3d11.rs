@@ -1111,7 +1111,7 @@ pub struct CxOsGeometry {
 
 // Shader compilation for HLSL
 impl DrawVars {
-    pub (crate) fn compile_shader(&mut self, vm: &mut ScriptVm, _apply: &mut ApplyScope, value: ScriptValue) {
+    pub (crate) fn compile_shader(&mut self, vm: &mut ScriptVm, _apply: &Apply, value: ScriptValue) {
         
         // Compile an HLSL shader
         if let Some(io_self) = value.as_object() {
@@ -1121,7 +1121,7 @@ impl DrawVars {
             output.pre_collect_rust_instance_io(vm, io_self);
             output.pre_collect_fragment_outputs(vm, io_self);
             
-            if let Some(fnobj) = vm.heap.object_method(io_self, id!(vertex).into(), &vm.thread.trap).as_object() {
+            if let Some(fnobj) = vm.heap.object_method(io_self, id!(vertex).into(), vm.thread.trap.pass()).as_object() {
                 output.mode = ShaderMode::Vertex;
                 ShaderFnCompiler::compile_shader_def(
                     vm,
@@ -1132,7 +1132,7 @@ impl DrawVars {
                     vec![],
                 );
             }
-            if let Some(fnobj) = vm.heap.object_method(io_self, id!(fragment).into(), &vm.thread.trap).as_object() {
+            if let Some(fnobj) = vm.heap.object_method(io_self, id!(fragment).into(), vm.thread.trap.pass()).as_object() {
                 output.mode = ShaderMode::Fragment;
                 ShaderFnCompiler::compile_shader_def(
                     vm,
@@ -1172,11 +1172,11 @@ impl DrawVars {
             self.dyn_instance_start = self.dyn_instances.len() - mapping.dyn_instances.total_slots;
             self.dyn_instance_slots = mapping.instances.total_slots;
             
-            // Read default values for dyn_instance slots from the shader object
-            self.read_dyn_instance_defaults(&vm.heap, &mapping, io_self);
-            
             // Access Cx from the vm host
             let cx = vm.host.cx_mut();
+            
+            // Read default values for dyn_instance slots from the shader object
+            self.fill_dyn_instances(cx, &vm.heap, &mapping, io_self);
             
             // Allocate CxDrawShader with os_shader_id set to None
             let index = cx.draw_shaders.shaders.len();
@@ -1197,7 +1197,7 @@ impl DrawVars {
             
             // See if we have a script-set vertex buffer with geometry
             if let Some(vb_obj) = output.find_vertex_buffer_object(vm, io_self) {
-                let buffer_value = vm.heap.value(vb_obj, id!(buffer).into(), &vm.thread.trap);
+                let buffer_value = vm.heap.value(vb_obj, id!(buffer).into(), vm.thread.trap.pass());
                 if let Some(handle) = buffer_value.as_handle() {
                     if let Some(geometry) = vm.heap.handle_ref::<Geometry>(handle) {
                         self.geometry_id = Some(geometry.geometry_id());

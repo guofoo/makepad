@@ -8,6 +8,7 @@ pub mod log;
 #[macro_use]
 mod cx;
 mod cx_api;
+mod arc_string_mut;
 
 pub mod action;
 pub mod game_input;
@@ -16,7 +17,6 @@ pub mod thread;
 pub mod audio;
 pub mod midi;
 pub mod video;
-pub mod scope;
 pub mod script;
 
 mod draw_matrix;
@@ -38,6 +38,7 @@ mod geometry;
 mod debug;
 mod component_map;
 mod component_list;
+pub mod component;
 mod performance_stats;
 pub mod studio;
 
@@ -66,6 +67,9 @@ pub use makepad_objc_sys;
 pub use ::windows as windows;
 
 pub use makepad_futures;
+
+// Re-export trap module for Script derive macro error macros that use crate::trap::ScriptTrap
+pub use makepad_script::trap;
  
 pub use {
     makepad_script,
@@ -77,12 +81,29 @@ pub use {
     log::*,
     makepad_math::*,
     makepad_math::makepad_micro_serde,
+    arc_string_mut::ArcStringMut,
     makepad_script::{
+        string::*,
+        trap::*,
+        apply::*,
         heap::*,
         value::*,
         object::*,
         vm::*,
         traits::*,
+        native::*,
+        handle::*,
+        script_value,
+        script_value_f64,
+        script_value_bool,
+        script_has_proto,
+        script_is_fn,
+        script_array_index,
+        set_script_value,
+        set_script_value_to_api,
+        set_script_value_to_pod,
+        script_args,
+        script_args_def,
         makepad_script_derive,
         makepad_script_derive::*,
         makepad_math,
@@ -97,7 +118,6 @@ pub use {
         os::*,
         cx_api::{CxOsApi,OpenUrlInPlace, CxOsOp},
         media_api::CxMediaApi,
-        scope::*,
         script::{
             vm::*,
         },
@@ -135,7 +155,7 @@ pub use {
             NetworkResponse,
             NetworkResponsesEvent,
             GameInputState,
-            Margin,
+            Inset,
             KeyCode,
             Event,
             Hit,
@@ -195,14 +215,20 @@ pub use {
             ActionTrait,
             ActionDefaultRef
         },
+        component::{
+            ComponentInfo,
+            ComponentRegistry,
+            ComponentRegistries,
+        },
         cursor::MouseCursor,
         macos_menu::MacosMenu,
         draw_matrix::DrawMatrix,
-        window::{WindowHandle,CxWindowPool, WindowId},
+        window::{ScriptWindowHandle, WindowHandle, CxWindowPool, WindowId},
         draw_pass::{
             DrawPassId,
             CxDrawPassParent,
             CxDrawPassRect,
+            ScriptDrawPass,
             DrawPass,
             DrawPassClearColor,
             DrawPassClearDepth

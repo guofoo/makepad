@@ -11,35 +11,208 @@ use crate::opcode::*;
 use crate::vm::*;
 use crate::thread::*;
 use std::any::Any;
+use crate::*;
 
 impl ScriptThread {
     // Object/Array begin handlers
     
     pub(crate) fn handle_begin_proto(&mut self, heap: &mut ScriptHeap) {
         let proto = self.pop_stack_resolved(heap);
-        let me = heap.new_with_proto_checked(proto, &self.trap);
+        let me = heap.new_with_proto_checked(proto, self.trap.pass());
         self.mes.push(ScriptMe::Object(me));
         self.trap.goto_next();
     }
     
-    pub(crate) fn handle_begin_proto_me(&mut self, heap: &mut ScriptHeap) {
+    /// Part 1 of proto-inherit (+:) operator.
+    /// Reads the field from current me (following prototype chain or type-check),
+    /// leaves field on stack, and pushes the proto value on stack for BEGIN_PROTO.
+    pub(crate) fn handle_proto_inherit_read(&mut self, heap: &mut ScriptHeap) {
         let field = self.peek_stack_value();
         let me = self.mes.last().unwrap();
-        let proto = if let ScriptMe::Object(object) = me{
-            heap.value(*object, field, &self.trap)
-        }
-        else{
+        let proto = if let ScriptMe::Object(object) = me {
+            // First try to get value from prototype chain (handles inheritance)
+            let value = heap.proto_field_from_value(*object, field, self.trap.pass());
+            
+            // If value not found, try to create from type-check structure
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take(); // Clear any error from value lookup
+                if let Some(field_id) = field.as_id() {
+                    heap.proto_field_from_type_check(*object, field_id, self.trap.pass())
+                } else {
+                    NIL
+                }
+            } else {
+                value
+            }
+        } else {
             NIL
         };
-        let me = heap.new_with_proto(proto);
-        self.mes.push(ScriptMe::Object(me));
+        self.push_stack_unchecked(proto);
+        self.trap.goto_next();
+    }
+    
+    /// Part 2 of proto-inherit (+:) operator.
+    /// Pops the constructed object and field from stack, writes object to current me[field].
+    /// Pushes NIL to satisfy POP_TO_ME (the assignment has no result value).
+    pub(crate) fn handle_proto_inherit_write(&mut self, heap: &mut ScriptHeap) {
+        let object = self.pop_stack_resolved(heap);
+        let field = self.pop_stack_value();
+        if let Some(me) = self.mes.last() {
+            if let ScriptMe::Object(me_obj) = me {
+                if field.is_string_like() {
+                    heap.set_string_keys(*me_obj);
+                }
+                heap.set_value(*me_obj, field, object, self.trap.pass());
+            }
+        }
+        // Push NIL as result so POP_TO_ME has something to pop
+        self.push_stack_unchecked(NIL);
+        self.trap.goto_next();
+    }
+    
+    /// Part 1 of scope-inherit (value += {}) operator.
+    /// Peeks the identifier from stack, reads scope variable value, pushes proto value on stack.
+    pub(crate) fn handle_scope_inherit_read(&mut self, heap: &mut ScriptHeap) {
+        let id = self.peek_stack_value();
+        let proto = if let Some(id) = id.as_id() {
+            let value = self.scope_value(heap, id);
+            // If not found or error, clear error and use NIL (will create bare object)
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take();
+                NIL
+            } else {
+                value
+            }
+        } else {
+            NIL
+        };
+        self.push_stack_unchecked(proto);
+        self.trap.goto_next();
+    }
+    
+    /// Part 2 of scope-inherit (value += {}) operator.
+    /// Pops the constructed object and identifier from stack, assigns to scope variable.
+    /// Pushes NIL to satisfy POP_TO_ME (the assignment has no result value).
+    pub(crate) fn handle_scope_inherit_write(&mut self, heap: &mut ScriptHeap) {
+        let object = self.pop_stack_resolved(heap);
+        let id = self.pop_stack_value();
+        if let Some(id) = id.as_id() {
+            self.set_scope_value(heap, id, object);
+        }
+        // Push NIL as result so POP_TO_ME has something to pop
+        self.push_stack_unchecked(NIL);
+        self.trap.goto_next();
+    }
+    
+    /// Part 1 of field-inherit (obj.field += {}) operator.
+    /// Stack has [object, field]. Peeks both, reads object.field, pushes proto value.
+    pub(crate) fn handle_field_inherit_read(&mut self, heap: &ScriptHeap) {
+        let field = self.peek_stack_value();
+        let object = self.peek_stack_value_at(1);
+        // Resolve if it's an identifier
+        let object = if let Some(id) = object.as_id() {
+            if !object.is_escaped_id() {
+                self.scope_value(heap, id)
+            } else {
+                object
+            }
+        } else {
+            object
+        };
+        let proto = if let Some(obj) = object.as_object() {
+            let value = heap.value(obj, field, self.trap.pass());
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take();
+                NIL
+            } else {
+                value
+            }
+        } else {
+            NIL
+        };
+        self.push_stack_unchecked(proto);
+        self.trap.goto_next();
+    }
+    
+    /// Part 2 of field-inherit (obj.field += {}) operator.
+    /// Pops built_object, field, object from stack. Writes built_object to object.field.
+    /// Pushes NIL to satisfy POP_TO_ME.
+    pub(crate) fn handle_field_inherit_write(&mut self, heap: &mut ScriptHeap) {
+        let built_object = self.pop_stack_resolved(heap);
+        let field = self.pop_stack_value();
+        let object = self.pop_stack_resolved(heap);
+        if let Some(obj) = object.as_object() {
+            if field.is_string_like() {
+                heap.set_string_keys(obj);
+            }
+            heap.set_value(obj, field, built_object, self.trap.pass());
+        }
+        // Push NIL as result so POP_TO_ME has something to pop
+        self.push_stack_unchecked(NIL);
+        self.trap.goto_next();
+    }
+    
+    /// Part 1 of index-inherit (obj[index] += {}) operator.
+    /// Stack has [object, index]. Peeks both, reads object[index], pushes proto value.
+    pub(crate) fn handle_index_inherit_read(&mut self, heap: &ScriptHeap) {
+        let index = self.peek_stack_value();
+        let object = self.peek_stack_value_at(1);
+        // Resolve if it's an identifier
+        let object = if let Some(id) = object.as_id() {
+            if !object.is_escaped_id() {
+                self.scope_value(heap, id)
+            } else {
+                object
+            }
+        } else {
+            object
+        };
+        let proto = if let Some(obj) = object.as_object() {
+            let value = heap.value(obj, index, self.trap.pass());
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take();
+                NIL
+            } else {
+                value
+            }
+        } else if let Some(arr) = object.as_array() {
+            let idx = index.as_index();
+            let value = heap.array_index(arr, idx, self.trap.pass());
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take();
+                NIL
+            } else {
+                value
+            }
+        } else {
+            NIL
+        };
+        self.push_stack_unchecked(proto);
+        self.trap.goto_next();
+    }
+    
+    /// Part 2 of index-inherit (obj[index] += {}) operator.
+    /// Pops built_object, index, object from stack. Writes built_object to object[index].
+    /// Pushes NIL to satisfy POP_TO_ME.
+    pub(crate) fn handle_index_inherit_write(&mut self, heap: &mut ScriptHeap) {
+        let built_object = self.pop_stack_resolved(heap);
+        let index = self.pop_stack_value();
+        let object = self.pop_stack_resolved(heap);
+        if let Some(obj) = object.as_object() {
+            heap.set_value(obj, index, built_object, self.trap.pass());
+        } else if let Some(arr) = object.as_array() {
+            let idx = index.as_index();
+            heap.set_array_index(arr, idx, built_object, self.trap.pass());
+        }
+        // Push NIL as result so POP_TO_ME has something to pop
+        self.push_stack_unchecked(NIL);
         self.trap.goto_next();
     }
     
     pub(crate) fn handle_end_proto(&mut self, heap: &mut ScriptHeap, code: &ScriptCode) {
         let me = self.mes.pop().unwrap();
         if let ScriptMe::Object(me) = me{
-            heap.finalize_maybe_pod_type(me, &code.builtins.pod, &self.trap);
+            heap.finalize_maybe_pod_type(me, &code.builtins.pod, self.trap.pass());
         }
         self.push_stack_unchecked(me.into());
         self.trap.goto_next();
@@ -92,7 +265,7 @@ impl ScriptThread {
                 }
             }
             else{
-                let value = heap.value(obj, field, &self.trap);
+                let value = heap.value(obj, field, self.trap.pass());
                 if !value.is_nil(){
                     if let Some(field) = field.as_id(){
                         self.def_scope_value(heap, field, value);
@@ -109,11 +282,11 @@ impl ScriptThread {
         let field = self.pop_stack_value();
         let object = self.pop_stack_resolved(heap);
         if let Some(obj) = object.as_object(){
-            let value = heap.value(obj, field, &self.trap);
+            let value = heap.value(obj, field, self.trap.pass());
             self.push_stack_unchecked(value);
         }
         else if let Some(pod) = object.as_pod(){
-            let value = heap.pod_read_field(pod, field, &code.builtins.pod, &self.trap);
+            let value = heap.pod_read_field(pod, field, &code.builtins.pod, self.trap.pass());
             self.push_stack_unchecked(value);
         }
         else {
@@ -135,7 +308,7 @@ impl ScriptThread {
         let field = self.pop_stack_value();
         let object = self.pop_stack_resolved(heap);
         if let Some(obj) = object.as_object(){
-            let value = heap.value(obj, field, &self.trap);
+            let value = heap.value(obj, field, self.trap.pass());
             self.push_stack_unchecked(value);
         }
         else{
@@ -148,16 +321,16 @@ impl ScriptThread {
         let field = self.pop_stack_value();
         let value = match self.mes.last().unwrap(){
             ScriptMe::Array(_) => {
-                self.trap.err_not_allowed_in_array()
+                script_err_not_allowed!(self.trap, "field access {:?} not allowed in array literal context", field)
             }
             ScriptMe::Call{args, ..} => {
-                heap.value(*args, field, &self.trap)
+                heap.value(*args, field, self.trap.pass())
             }
             ScriptMe::Pod{pod, ..} => {
-                heap.pod_read_field(*pod, field, &code.builtins.pod, &self.trap)
+                heap.pod_read_field(*pod, field, &code.builtins.pod, self.trap.pass())
             }
             ScriptMe::Object(obj) => {
-                heap.value(*obj, field, &self.trap)
+                heap.value(*obj, field, self.trap.pass())
             }
         };
         self.push_stack_value(value);
@@ -168,11 +341,25 @@ impl ScriptThread {
         let field = self.pop_stack_value();
         let object = self.pop_stack_resolved(heap);
         if let Some(obj) = object.as_object(){
-            let value = heap.value(obj, field, &self.trap);
-            self.push_stack_unchecked(value)
+            // First try to get value from prototype chain (handles inheritance)
+            let value = heap.proto_field_from_value(obj, field, self.trap.pass());
+            
+            // If value not found, try to create from type-check structure
+            if value.is_nil() || value.is_err() {
+                self.trap.err.take(); // Clear any error from value lookup
+                if let Some(field_id) = field.as_id() {
+                    let value = heap.proto_field_from_type_check(obj, field_id, self.trap.pass());
+                    self.push_stack_unchecked(value);
+                } else {
+                    let value = script_err_not_found!(self.trap, "proto field lookup requires identifier, got {:?}", field.value_type());
+                    self.push_stack_unchecked(value);
+                }
+            } else {
+                self.push_stack_unchecked(value)
+            }
         }
         else{
-            let value = self.trap.err_not_object();
+            let value = script_err_wrong_value!(self.trap, "proto_field {:?} target is not an object (got {:?})", field, object.value_type());
             self.push_stack_unchecked(value);
         }
         self.trap.goto_next();
@@ -180,6 +367,67 @@ impl ScriptThread {
     
     pub(crate) fn handle_pop_to_me(&mut self, heap: &mut ScriptHeap, code: &ScriptCode) {
         self.pop_to_me(heap, code);
+        self.trap.goto_next();
+    }
+    
+    /// Handle the splat operator (..) which spreads a source value into the current me context.
+    /// For objects: merges both vec and map from source into target
+    /// For arrays: merges all elements from source into target
+    /// For call args: pushes all elements from source as unnamed args
+    pub(crate) fn handle_me_splat(&mut self, heap: &mut ScriptHeap) {
+        let source = self.pop_stack_resolved(heap);
+        if !self.call_has_me(){
+            self.trap.goto_next();
+            return;
+        }
+        
+        match self.mes.last().unwrap(){
+            ScriptMe::Object(obj) => {
+                // Splat into an object: merge vec and map
+                if let Some(source_obj) = source.as_object(){
+                    heap.merge_object(*obj, source_obj, self.trap.pass());
+                }
+                else if let Some(source_arr) = source.as_array(){
+                    // Splat array into object: push array elements to vec
+                    let len = heap.array_len(source_arr);
+                    for i in 0..len {
+                        let v = heap.array_index(source_arr, i, self.trap.pass());
+                        heap.vec_push(*obj, NIL, v, self.trap.pass());
+                    }
+                }
+            }
+            ScriptMe::Array(arr) => {
+                // Splat into an array: merge all elements
+                if let Some(source_arr) = source.as_array(){
+                    heap.merge_array(*arr, source_arr, self.trap.pass());
+                }
+                else if let Some(source_obj) = source.as_object(){
+                    // Splat object vec into array (array_push_vec takes array, object)
+                    heap.array_push_vec(*arr, source_obj, self.trap.pass());
+                }
+            }
+            ScriptMe::Call{args, ..} => {
+                // Splat into call args: push each element as unnamed arg
+                if let Some(source_obj) = source.as_object(){
+                    let len = heap.vec_len(source_obj);
+                    for i in 0..len {
+                        let kv = heap.vec_key_value(source_obj, i, self.trap.pass());
+                        heap.unnamed_fn_arg(*args, kv.value, self.trap.pass());
+                    }
+                }
+                else if let Some(source_arr) = source.as_array(){
+                    let len = heap.array_len(source_arr);
+                    for i in 0..len {
+                        let v = heap.array_index(source_arr, i, self.trap.pass());
+                        heap.unnamed_fn_arg(*args, v, self.trap.pass());
+                    }
+                }
+            }
+            ScriptMe::Pod{..} => {
+                // Splat not supported for pods
+                script_err_not_impl!(self.trap, "splat operator (..) not supported for pod types");
+            }
+        }
         self.trap.goto_next();
     }
 
@@ -190,21 +438,21 @@ impl ScriptThread {
         let object = self.pop_stack_resolved(heap);
         
         if let Some(obj) = object.as_object(){
-            let value = heap.value(obj, index, &self.trap);
+            let value = heap.value(obj, index, self.trap.pass());
             self.push_stack_unchecked(value)
         }
         else if let Some(arr) = object.as_array(){
             let index = index.as_index();
-            let value = heap.array_index(arr, index, &self.trap);
+            let value = heap.array_index(arr, index, self.trap.pass());
             self.push_stack_unchecked(value)
         }
         else if let Some(pod) = object.as_pod(){
             let index = index.as_index();
-            let value = heap.pod_array_index(pod, index, &code.builtins.pod, &self.trap);
+            let value = heap.pod_array_index(pod, index, &code.builtins.pod, self.trap.pass());
             self.push_stack_unchecked(value)
         }
         else{
-            let value = self.trap.err_not_object();
+            let value = script_err_wrong_value!(self.trap, "cannot index {:?} on {:?} (not an object/array/pod)", index, object.value_type());
             self.push_stack_unchecked(value);
         }
         self.trap.goto_next();
@@ -314,12 +562,18 @@ impl ScriptThread {
     pub fn log(&self, heap: &ScriptHeap, code: &ScriptCode, value: ScriptValue){
         if let Some(loc) = code.ip_to_loc(self.trap.ip){
             if value != NIL{
-                if let Some(err) = value.as_err(){
-                    if let Some(loc2) = code.ip_to_loc(err.ip){
-                        log_with_level(&loc.file, loc.line, loc.col, loc.line, loc.col, format!("{} {}", value, loc2), LogLevel::Log);
+                if let Some(err_ptr) = value.as_err(){
+                    if let Some(loc2) = code.ip_to_loc(err_ptr.ip){
+                        // Check if there's a matching error in the trap queue with full details
+                        let err_queue = self.trap.err.borrow();
+                        if let Some(err) = err_queue.iter().find(|e| e.value == value) {
+                            log_with_level(&loc.file, loc.line, loc.col, loc.line, loc.col, format!("{} ({}:{}) {}", err.message, err.origin_file, err.origin_line, loc2), LogLevel::Log);
+                        } else {
+                            log_with_level(&loc.file, loc.line, loc.col, loc.line, loc.col, format!("{} {}", value, loc2), LogLevel::Log);
+                        }
                     }
                 }
-                if let Some(nanip) = value.as_f64_traced_nan(){
+                else if let Some(nanip) = value.as_f64_traced_nan(){
                     if let Some(loc2) = code.ip_to_loc(nanip){
                         log_with_level(&loc.file, loc.line, loc.col, loc.line, loc.col, format!("{} NaN Traced to {}", value, loc2), LogLevel::Log);
                     }
@@ -327,7 +581,7 @@ impl ScriptThread {
                 else{
                     let mut out = String::new();
                     let mut recur = Vec::new();
-                    heap.to_debug_string(value, &mut recur, &mut out);
+                    heap.to_debug_string(value, &mut recur, &mut out, true, 0);
                     log_with_level(&loc.file, loc.line, loc.col, loc.line, loc.col, format!("{:?}:{out}", value.value_type()), LogLevel::Log);
                 }
             }

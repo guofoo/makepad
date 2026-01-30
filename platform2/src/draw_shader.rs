@@ -2,12 +2,17 @@ use {
     std::{
         ops::{Index, IndexMut},
         collections::BTreeSet,
+        collections::HashMap,
     },
     crate::{
+        
         makepad_live_id::*,
+        makepad_script::ScriptObjectRef,
         makepad_script::shader::*,
         makepad_script::heap::ScriptHeap,
-        //draw_vars::DrawVars,
+        makepad_script::value::ScriptObject,
+        draw_vars::DrawVars,
+        geometry::GeometryId,
         os::CxOsDrawShader,
         cx::Cx
     }
@@ -52,18 +57,22 @@ impl CxDrawShaderOptions {
     }
 }
 
+/*
 #[derive(Default)]
-pub struct _CxDrawShaderItem {
+pub struct CxDrawShaderItem {
     pub draw_shader_id: usize,
     pub options: CxDrawShaderOptions
-}
+}*/
 
 #[derive(Default)]
 pub struct CxDrawShaders {
     pub shaders: Vec<CxDrawShader>,
     pub os_shaders: Vec<CxOsDrawShader>,
-    pub generation: u64,
     pub compile_set: BTreeSet<usize>,
+    
+    pub cache_object_id_to_shader: HashMap<ScriptObject, DrawShaderId>,
+    pub cache_functions_to_shader: LiveIdMap<LiveId, DrawShaderId>,
+    pub cache_code_to_shader: HashMap<CxDrawShaderCode, DrawShaderId>,
     //pub ptr_to_item: HashMap<DrawShaderPtr, CxDrawShaderItem>,
     //pub fingerprints: Vec<DrawShaderFingerprint>,
     //pub error_set: HashSet<DrawShaderPtr>,
@@ -82,7 +91,6 @@ impl CxDrawShaders{
 
 impl Cx {
     pub fn flush_draw_shaders(&mut self) {
-        self.draw_shaders.generation += 1;
         /*        
         self.shader_registry.flush_registry();
         self.draw_shaders.shaders.clear();
@@ -108,7 +116,6 @@ impl IndexMut<usize> for CxDrawShaders {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct DrawShaderId {
-    pub generation: u64,
     pub index: usize,
     //pub draw_shader_ptr: DrawShaderPtr
 }
@@ -123,37 +130,6 @@ pub struct CxDrawShader {
     pub debug_id: LiveId,
     pub os_shader_id: Option<usize>,
     pub mapping: CxDrawShaderMapping
-}
-
-#[derive(Debug, PartialEq)]
-pub struct _DrawShaderFingerprint {
-    //pub fingerprint: Vec<LiveNode>,
-    pub draw_shader_id: usize
-}
-
-impl _DrawShaderFingerprint {
-    /*pub fn from_ptr(cx: &Cx, draw_shader_ptr: DrawShaderPtr) -> Vec<LiveNode> {
-        let live_registry_cp = cx.live_registry.clone();
-        let live_registry = live_registry_cp.borrow();
-        let doc = live_registry.ptr_to_doc(draw_shader_ptr.0);
-        let mut node_iter = doc.nodes.first_child(draw_shader_ptr.node_index());
-        let mut fingerprint = Vec::new();
-        while let Some(node_index) = node_iter {
-            let node = &doc.nodes[node_index];
-            match node.value {
-                LiveValue::DSL {token_start, token_count, ..} => {
-                    fingerprint.push(LiveNode {
-                        id: node.id,
-                        origin: node.origin,
-                        value: LiveValue::DSL {token_start, token_count, expand_index: None}
-                    });
-                }
-                _ => ()
-            }
-            node_iter = doc.nodes.next_child(node_index);
-        }
-        fingerprint
-    }*/
 }
 
 #[derive(Clone, Debug)]
@@ -294,39 +270,35 @@ pub struct DrawShaderFlags {
     pub draw_call_always: bool,
 }
 
-#[derive(Clone)]
-pub enum CxDrawShaderSource {
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub enum CxDrawShaderCode {
     Separate{vertex:String, fragment:String},
-    Combined{source:String}
+    Combined{code:String}
 }    
 
 #[derive(Clone)]
 pub struct CxDrawShaderMapping {
-    pub source: CxDrawShaderSource,
+    pub source: ScriptObjectRef,
+    pub code: CxDrawShaderCode,
     pub flags: DrawShaderFlags,
     pub instances: DrawShaderInputs,
     pub dyn_instances: DrawShaderInputs,
     pub dyn_uniforms: DrawShaderInputs,
     pub geometries: DrawShaderInputs,
-    // pub const_table: DrawShaderConstTable,
-    // pub live_instances: DrawShaderInputs,
-    // pub live_uniforms: DrawShaderInputs,
-    // pub draw_call_uniforms: DrawShaderInputs,
-    // pub draw_list_uniforms: DrawShaderInputs,
-    // pub pass_uniforms: DrawShaderInputs,
     pub textures: Vec<DrawShaderTextureInput>,
     pub uses_time: bool,
-    // pub instance_enums: Vec<usize>,
     pub rect_pos: Option<usize>,
     pub rect_size: Option<usize>,
     pub draw_clip: Option<usize>,
-    //pub live_uniforms_buf: Vec<f32>,
-    /// Mapping from uniform buffer type names to Metal buffer indices
     pub uniform_buffer_bindings: UniformBufferBindings,
+    pub scope_uniforms: DrawShaderInputs,
+    pub scope_uniform_sources: Vec<(ScriptObject, LiveId)>,
+    pub scope_uniforms_buf: Vec<f32>,
+    pub geometry_id: Option<GeometryId>,
 }
 
 impl CxDrawShaderMapping {
-    pub fn from_shader_output(source:CxDrawShaderSource, heap: &ScriptHeap, output: &ShaderOutput) -> CxDrawShaderMapping {
+    pub fn from_shader_output(source:ScriptObjectRef, code:CxDrawShaderCode, heap: &ScriptHeap, output: &ShaderOutput, geometry_id: Option<GeometryId>) -> CxDrawShaderMapping {
         // Use attribute packing for instances (they're vertex attributes)
         // instances contains ALL instance fields (dyn first, then rust)
         let mut instances = DrawShaderInputs::new(DrawShaderInputPacking::Attribute);
@@ -413,19 +385,76 @@ impl CxDrawShaderMapping {
         // (must call assign_uniform_buffer_indices before from_shader_output)
         let uniform_buffer_bindings = output.get_uniform_buffer_bindings(heap);
         
+        // Build scope uniforms layout using DrawShaderInputs (4-byte slot alignment)
+        let mut scope_uniforms = DrawShaderInputs::new(uniform_packing());
+        let mut scope_uniform_sources = Vec::new();
+        
+        // Process scope uniforms in order - same order as they appear in the io list
+        for io in &output.io {
+            if let ShaderIoKind::ScopeUniform = io.kind {
+                // Find the corresponding ScopeUniformSource
+                if let Some(source) = output.scope_uniforms.iter().find(|su| su.shader_name == io.name) {
+                    let pod_ty = heap.pod_type_ref(source.ty);
+                    let slots = pod_ty.ty.slots();
+                    scope_uniforms.push(io.name, slots);
+                    scope_uniform_sources.push((source.source_obj, source.key));
+                }
+            }
+        }
+        scope_uniforms.finalize();
+        
+        // Allocate the buffer for scope uniforms (as f32 slots)
+        let scope_uniforms_buf = vec![0.0f32; scope_uniforms.total_slots];
+        
+        // Check if shader uses draw_pass->time (requires repaint every frame)
+        let uses_time = match &code {
+            CxDrawShaderCode::Combined { code } => code.contains("draw_pass->time"),
+            CxDrawShaderCode::Separate { vertex, fragment } => {
+                vertex.contains("draw_pass->time") || fragment.contains("draw_pass->time")
+            }
+        };
+        
         CxDrawShaderMapping {
             source,
+            code,
             flags: DrawShaderFlags::default(),
             instances,
             dyn_instances,
             dyn_uniforms,
             geometries,
             textures,
-            uses_time: false, // TODO: detect time usage in shader
+            uses_time,
             rect_pos,
             rect_size,
             draw_clip,
             uniform_buffer_bindings,
+            scope_uniforms,
+            scope_uniform_sources,
+            scope_uniforms_buf,
+            geometry_id,
+        }
+    }
+    
+    /// Fill the scope uniform buffer from script values.
+    /// 
+    /// This reads values from the script heap using the source_obj and key for each entry,
+    /// converts them to f32 slots, and writes to the buffer.
+    pub fn fill_scope_uniforms_buffer(
+        &mut self,
+        heap: &ScriptHeap,
+        trap: &crate::makepad_script::trap::ScriptTrap,
+    ) {
+        for (i, input) in self.scope_uniforms.inputs.iter().enumerate() {
+            if i >= self.scope_uniform_sources.len() {
+                break;
+            }
+            let (source_obj, key) = self.scope_uniform_sources[i];
+            
+            // Read the value from the heap
+            let value = heap.scope_value(source_obj, key, *trap);
+            
+            // Write value to buffer at the input's offset
+            DrawVars::write_value_to_f32_slots(heap, value, &mut self.scope_uniforms_buf, input.offset, input.slots);
         }
     }
     
@@ -539,7 +568,7 @@ impl CxDrawShaderMapping {
         }
     }*/
     /*
-    pub fn update_live_and_user_uniforms(&mut self, cx: &mut Cx, apply: &mut Apply) {
+    pub fn update_live_and_user_uniforms(&mut self, cx: &mut Cx, apply: &Apply) {
         // and write em into the live_uniforms buffer
         let live_registry = cx.live_registry.clone();
         let live_registry = live_registry.borrow();

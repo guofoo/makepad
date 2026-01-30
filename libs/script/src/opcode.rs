@@ -141,8 +141,15 @@ impl Opcode{
     pub const ASSIGN_INDEX_IFNIL:Self = Self(64);    
 
     pub const BEGIN_PROTO:Self = Self(65);
-    pub const BEGIN_PROTO_ME:Self = Self(66);
+    pub const PROTO_INHERIT_READ:Self = Self(66);
     pub const END_PROTO:Self = Self(67);
+    pub const PROTO_INHERIT_WRITE:Self = Self(118);
+    pub const SCOPE_INHERIT_READ:Self = Self(119);
+    pub const SCOPE_INHERIT_WRITE:Self = Self(120);
+    pub const FIELD_INHERIT_READ:Self = Self(121);
+    pub const FIELD_INHERIT_WRITE:Self = Self(122);
+    pub const INDEX_INHERIT_READ:Self = Self(123);
+    pub const INDEX_INHERIT_WRITE:Self = Self(124);
     pub const BEGIN_BARE:Self = Self(68);
     pub const END_BARE:Self = Self(69);
     pub const BEGIN_ARRAY:Self = Self(70);
@@ -202,6 +209,7 @@ impl Opcode{
     pub const USE:Self = Self(115);
     pub const VAR_TYPED:Self = Self(116);
     pub const VAR_DYN:Self = Self(117);
+    pub const ME_SPLAT:Self = Self(125);
 }
 
 
@@ -301,8 +309,15 @@ impl fmt::Display for Opcode {
             Self::ASSIGN_INDEX_IFNIL => return write!(f, "[]?="),
                                         
             Self::BEGIN_PROTO => return write!(f, "<proto>{{"),
-            Self::BEGIN_PROTO_ME => return write!(f, "<protome>{{"),
+            Self::PROTO_INHERIT_READ => return write!(f, "<proto_inh_rd>"),
             Self::END_PROTO => return write!(f, "}}"),
+            Self::PROTO_INHERIT_WRITE => return write!(f, "<proto_inh_wr>"),
+            Self::SCOPE_INHERIT_READ => return write!(f, "<scope_inh_rd>"),
+            Self::SCOPE_INHERIT_WRITE => return write!(f, "<scope_inh_wr>"),
+            Self::FIELD_INHERIT_READ => return write!(f, "<field_inh_rd>"),
+            Self::FIELD_INHERIT_WRITE => return write!(f, "<field_inh_wr>"),
+            Self::INDEX_INHERIT_READ => return write!(f, "<idx_inh_rd>"),
+            Self::INDEX_INHERIT_WRITE => return write!(f, "<idx_inh_wr>"),
             Self::BEGIN_BARE => return write!(f, "<bare>{{"),
             Self::END_BARE => return write!(f, "}}"),
             
@@ -363,6 +378,7 @@ impl fmt::Display for Opcode {
             Self::USE=>return write!(f, "use"),
             Self::OK_TEST=>return write!(f, "ok_test"),
             Self::OK_END=>return write!(f, "ok_end"),
+            Self::ME_SPLAT=>return write!(f, "..splat"),
             _=>return write!(f, "OP{}",self.0)
         }
     }

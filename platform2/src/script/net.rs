@@ -298,7 +298,7 @@ impl Cx{
     }
 }
 
-pub fn define_net_module(vm:&mut ScriptVm){
+pub fn script_mod(vm:&mut ScriptVm){
     let net = vm.new_module(id_lut!(net));
     
     set_script_value_to_api!(vm, net.HttpRequest);
@@ -314,7 +314,7 @@ pub fn define_net_module(vm:&mut ScriptVm){
         let events = script_value!(vm, args.events);
         if !script_has_proto!(vm, options, net.HttpServerOptions) || 
         !script_has_proto!(vm, events, net.HttpServerEvents) {
-            return vm.thread.trap.err_invalid_arg_type()
+            return script_err_type_mismatch!(vm.thread.trap.pass(), "invalid net arg type")
         }
         
         let options = HttpServerOptions::script_from_value(vm, options);
@@ -355,7 +355,7 @@ pub fn define_net_module(vm:&mut ScriptVm){
         // we should check if options is actually of type HttpRequest
         if !script_has_proto!(vm, request, net.HttpRequest) || 
             !script_has_proto!(vm, events, net.HttpEvents) {
-            return vm.thread.trap.err_invalid_arg_type()
+            return script_err_type_mismatch!(vm.thread.trap.pass(), "invalid net arg type")
         }
         let request = HttpRequest::script_from_value(vm, request);
         let events = HttpEvents::script_from_value(vm, events);
@@ -387,13 +387,13 @@ pub fn define_net_module(vm:&mut ScriptVm){
         }
         else{
             if !script_has_proto!(vm, request, net.HttpRequest){
-                return vm.thread.trap.err_invalid_arg_type()
+                return script_err_type_mismatch!(vm.thread.trap.pass(), "invalid net arg type")
             }
             HttpRequest::script_from_value(vm, request)
         };
         
         if !script_has_proto!(vm, events, net.WebSocketEvents) {
-            return vm.thread.trap.err_invalid_arg_type()
+            return script_err_type_mismatch!(vm.thread.trap.pass(), "invalid net arg type")
         }
         let events = WebSocketEvents::script_from_value(vm, events);
         

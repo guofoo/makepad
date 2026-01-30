@@ -22,12 +22,12 @@ impl ScriptThread {
         match opcode {
 // ARITHMETIC            
             Opcode::NOT => self.handle_not(heap),
-            Opcode::NEG => self.handle_neg(heap),
-            Opcode::MUL => self.handle_f64_op(heap, opargs, |a,b| a*b),
-            Opcode::DIV => self.handle_f64_op(heap, opargs, |a,b| a/b),
+            Opcode::NEG => self.handle_neg(heap, code),
+            Opcode::MUL => self.handle_mul(heap, code, opargs),
+            Opcode::DIV => self.handle_div(heap, code, opargs),
             Opcode::MOD => self.handle_f64_op(heap, opargs, |a,b| a%b),
-            Opcode::ADD => self.handle_add(heap, opargs),
-            Opcode::SUB => self.handle_f64_op(heap, opargs, |a,b| a-b),
+            Opcode::ADD => self.handle_add(heap, code, opargs),
+            Opcode::SUB => self.handle_sub(heap, code, opargs),
             Opcode::SHL => self.handle_fu64_op(heap, opargs, |a,b| a>>b),
             Opcode::SHR => self.handle_fu64_op(heap, opargs, |a,b| a<<b),
             Opcode::AND => self.handle_fu64_op(heap, opargs, |a,b| a&b),
@@ -99,7 +99,14 @@ impl ScriptThread {
 
 // Object/Array begin
             Opcode::BEGIN_PROTO => self.handle_begin_proto(heap),
-            Opcode::BEGIN_PROTO_ME => self.handle_begin_proto_me(heap),
+            Opcode::PROTO_INHERIT_READ => self.handle_proto_inherit_read(heap),
+            Opcode::PROTO_INHERIT_WRITE => self.handle_proto_inherit_write(heap),
+            Opcode::SCOPE_INHERIT_READ => self.handle_scope_inherit_read(heap),
+            Opcode::SCOPE_INHERIT_WRITE => self.handle_scope_inherit_write(heap),
+            Opcode::FIELD_INHERIT_READ => self.handle_field_inherit_read(heap),
+            Opcode::FIELD_INHERIT_WRITE => self.handle_field_inherit_write(heap),
+            Opcode::INDEX_INHERIT_READ => self.handle_index_inherit_read(heap),
+            Opcode::INDEX_INHERIT_WRITE => self.handle_index_inherit_write(heap),
             Opcode::END_PROTO => self.handle_end_proto(heap, code),
             Opcode::BEGIN_BARE => self.handle_begin_bare(heap),
             Opcode::END_BARE => self.handle_end_bare(),
@@ -165,6 +172,7 @@ impl ScriptThread {
             Opcode::ME_FIELD => self.handle_me_field(heap, code),
             Opcode::PROTO_FIELD => self.handle_proto_field(heap),
             Opcode::POP_TO_ME => self.handle_pop_to_me(heap, code),
+            Opcode::ME_SPLAT => self.handle_me_splat(heap),
 
 // Array index            
             Opcode::ARRAY_INDEX => self.handle_array_index(heap, code),

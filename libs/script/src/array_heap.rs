@@ -32,13 +32,13 @@ impl ScriptHeap{
         self.arrays[array.index as usize].storage.len()
     }
         
-    pub fn array_push(&mut self, array:ScriptArray, value:ScriptValue, trap:&ScriptTrap){
+    pub fn array_push(&mut self, array:ScriptArray, value:ScriptValue, trap:ScriptTrap){
         if let Some(obj) = value.as_object(){
             self.set_reffed(obj);
         }
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            trap.err_frozen();
+            script_err_immutable!(trap, "array is frozen");
             return 
         }
         array.tag.set_dirty();
@@ -54,16 +54,40 @@ impl ScriptHeap{
         array.storage.pop_front()
     }
         
-    pub fn array_push_vec(&mut self, array:ScriptArray, object:ScriptObject, trap:&ScriptTrap){
+    pub fn array_push_vec(&mut self, array:ScriptArray, object:ScriptObject, trap:ScriptTrap){
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            trap.err_frozen();
+            script_err_immutable!(trap, "array is frozen");
             return 
         }
         array.tag.set_dirty();
         let object = &self.objects[object.index as usize];
         for kv in &object.vec{
             array.storage.push(kv.value);
+        }
+    }
+    
+    /// Merges all elements from source array into target array.
+    /// Used by the splat operator (..) to spread one array into another.
+    pub fn merge_array(&mut self, target:ScriptArray, source:ScriptArray, trap:ScriptTrap){
+        // Get the storage from source first
+        let source_storage = &self.arrays[source.index as usize].storage;
+        let values: Vec<ScriptValue> = match source_storage {
+            ScriptArrayStorage::ScriptValue(v) => v.iter().copied().collect(),
+            ScriptArrayStorage::U8(v) => v.iter().map(|x| ScriptValue::from_f64(*x as f64)).collect(),
+            ScriptArrayStorage::U16(v) => v.iter().map(|x| ScriptValue::from_f64(*x as f64)).collect(),
+            ScriptArrayStorage::U32(v) => v.iter().map(|x| ScriptValue::from_f64(*x as f64)).collect(),
+            ScriptArrayStorage::F32(v) => v.iter().map(|x| ScriptValue::from_f64(*x as f64)).collect(),
+        };
+        
+        let target_arr = &mut self.arrays[target.index as usize];
+        if target_arr.tag.is_frozen(){
+            script_err_immutable!(trap, "array is frozen");
+            return 
+        }
+        target_arr.tag.set_dirty();
+        for v in values {
+            target_arr.storage.push(v);
         }
     }
         
@@ -89,10 +113,10 @@ impl ScriptHeap{
         ptr
     }
         
-    pub fn array_mut(&mut self, array:ScriptArray,trap:&ScriptTrap)->Option<&mut ScriptArrayStorage>{
+    pub fn array_mut(&mut self, array:ScriptArray,trap:ScriptTrap)->Option<&mut ScriptArrayStorage>{
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            trap.err_frozen();
+            script_err_immutable!(trap, "array is frozen");
             return None
         }
         array.tag.set_dirty();
@@ -115,36 +139,36 @@ impl ScriptHeap{
         r
     }
             
-    pub fn array_remove(&mut self, array:ScriptArray, index: usize,trap:&ScriptTrap)->ScriptValue{
+    pub fn array_remove(&mut self, array:ScriptArray, index: usize,trap:ScriptTrap)->ScriptValue{
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            return trap.err_frozen();
+            return script_err_immutable!(trap, "array is frozen");
         }
         array.tag.set_dirty();
         if index >= array.storage.len(){
-            return trap.err_array_bound()
+            return script_err_out_of_bounds!(trap, "array remove index {} out of bounds (len={})", index, array.storage.len())
         }
         array.storage.remove(index)
     }
         
-    pub fn array_pop(&mut self, array:ScriptArray, trap:&ScriptTrap)->ScriptValue{
+    pub fn array_pop(&mut self, array:ScriptArray, trap:ScriptTrap)->ScriptValue{
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            return trap.err_frozen()
+            return script_err_immutable!(trap, "array is frozen")
         }
         if let Some(value) = array.storage.pop(){
             array.tag.set_dirty();
             value
         }
         else{
-            trap.err_array_bound()
+            script_err_out_of_bounds!(trap, "array pop on empty array")
         }
     }
         
-    pub fn array_clear(&mut self, array:ScriptArray, trap:&ScriptTrap){
+    pub fn array_clear(&mut self, array:ScriptArray, trap:ScriptTrap){
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            trap.err_frozen();
+            script_err_immutable!(trap, "array is frozen");
             return
         }
         if array.storage.len() != 0{
@@ -153,12 +177,13 @@ impl ScriptHeap{
         }
     }
         
-    pub fn array_index(&self, array:ScriptArray, index:usize, trap:&ScriptTrap)->ScriptValue{
-        if let Some(value) = self.arrays[array.index as usize].storage.index(index){
+    pub fn array_index(&self, array:ScriptArray, index:usize, trap:ScriptTrap)->ScriptValue{
+        let storage = &self.arrays[array.index as usize].storage;
+        if let Some(value) = storage.index(index){
             return value
         }
         else{
-            trap.err_array_bound()
+            script_err_out_of_bounds!(trap, "array index {} out of bounds (len={})", index, storage.len())
         }
     }
         
@@ -171,10 +196,10 @@ impl ScriptHeap{
         }
     }
         
-    pub fn set_array_index(&mut self, array:ScriptArray, index:usize, value:ScriptValue, trap:&ScriptTrap)->ScriptValue{
+    pub fn set_array_index(&mut self, array:ScriptArray, index:usize, value:ScriptValue, trap:ScriptTrap)->ScriptValue{
         let array = &mut self.arrays[array.index as usize];
         if array.tag.is_frozen(){
-            return trap.err_frozen();
+            return script_err_immutable!(trap, "array is frozen");
         }
         array.tag.set_dirty();
         array.storage.set_index(index, value);
