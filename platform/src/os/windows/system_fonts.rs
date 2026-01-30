@@ -1,8 +1,4 @@
 //! Windows system font provider using DirectWrite.
-//!
-//! This module provides access to system fonts on Windows through the DirectWrite
-//! API. It implements the `SystemFontProvider` trait to allow querying fonts
-//! by family name and retrieving font file data.
 
 use std::path::PathBuf;
 
@@ -14,9 +10,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL,
 };
 
-use crate::os::system_fonts::{
-    fallbacks, try_fallback_chain, FontStyle, SystemFontData, SystemFontError, SystemFontProvider,
-};
+use crate::os::system_fonts::{SystemFontData, SystemFontError, SystemFontProvider};
 
 /// Windows system font provider using DirectWrite.
 pub struct WindowsFontProvider {
@@ -98,20 +92,14 @@ impl Default for WindowsFontProvider {
 }
 
 impl SystemFontProvider for WindowsFontProvider {
-    fn query_font(
-        &self,
-        family: &str,
-        _style: Option<FontStyle>,
-    ) -> Result<SystemFontData, SystemFontError> {
+    fn query_font(&self, family: &str) -> Result<SystemFontData, SystemFontError> {
         unsafe {
-            // Get the system font collection
             let mut collection: Option<IDWriteFontCollection> = None;
             self.factory
                 .GetSystemFontCollection(&mut collection, false)
                 .map_err(|_| SystemFontError::PlatformNotSupported)?;
             let collection = collection.ok_or(SystemFontError::PlatformNotSupported)?;
 
-            // Find the font family by name
             let family_wide: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
             let mut index = 0u32;
             let mut exists = false.into();
@@ -123,12 +111,10 @@ impl SystemFontProvider for WindowsFontProvider {
                 return Err(SystemFontError::FontNotFound(family.to_string()));
             }
 
-            // Get the font family
             let font_family = collection
                 .GetFontFamily(index)
                 .map_err(|_| SystemFontError::FontNotFound(family.to_string()))?;
 
-            // Get the first matching font with normal weight/stretch/style
             let font = font_family
                 .GetFirstMatchingFont(
                     DWRITE_FONT_WEIGHT_NORMAL,
@@ -137,25 +123,22 @@ impl SystemFontProvider for WindowsFontProvider {
                 )
                 .map_err(|_| SystemFontError::FontNotFound(family.to_string()))?;
 
-            // Create font face to get file information
             let font_face = font
                 .CreateFontFace()
                 .map_err(|_| SystemFontError::AccessDenied)?;
 
-            // Get the font file path
             let path = self.get_font_file_path(&font_face)?;
 
-            // Read the font file data
             let data = std::fs::read(&path).map_err(|e| {
                 if e.kind() == std::io::ErrorKind::PermissionDenied {
                     SystemFontError::AccessDenied
                 } else {
-                    SystemFontError::ReadError(format!("Failed to read font file: {}", e))
+                    SystemFontError::ReadError(format!("{}: {}", path.display(), e))
                 }
             })?;
 
             if data.is_empty() {
-                return Err(SystemFontError::InvalidFontData);
+                return Err(SystemFontError::ReadError("Empty font file".to_string()));
             }
 
             Ok(SystemFontData {
@@ -168,7 +151,6 @@ impl SystemFontProvider for WindowsFontProvider {
 
     fn list_families(&self) -> Vec<String> {
         unsafe {
-            // Get the system font collection
             let mut collection: Option<IDWriteFontCollection> = None;
             if self
                 .factory
@@ -177,9 +159,8 @@ impl SystemFontProvider for WindowsFontProvider {
             {
                 return Vec::new();
             }
-            let collection = match collection {
-                Some(c) => c,
-                None => return Vec::new(),
+            let Some(collection) = collection else {
+                return Vec::new();
             };
 
             let count = collection.GetFontFamilyCount();
@@ -203,18 +184,6 @@ impl SystemFontProvider for WindowsFontProvider {
             result
         }
     }
-
-    fn default_sans(&self) -> Result<SystemFontData, SystemFontError> {
-        try_fallback_chain(self, fallbacks::WINDOWS_SANS, None)
-    }
-
-    fn default_monospace(&self) -> Result<SystemFontData, SystemFontError> {
-        try_fallback_chain(self, fallbacks::WINDOWS_MONO, None)
-    }
-
-    fn default_serif(&self) -> Result<SystemFontData, SystemFontError> {
-        try_fallback_chain(self, fallbacks::WINDOWS_SERIF, None)
-    }
 }
 
 /// Get the system font provider for Windows
@@ -230,15 +199,13 @@ mod tests {
     fn test_list_families() {
         let provider = WindowsFontProvider::new().expect("Failed to create provider");
         let families = provider.list_families();
-        // Windows should have at least some fonts
         assert!(!families.is_empty());
     }
 
     #[test]
     fn test_query_arial() {
         let provider = WindowsFontProvider::new().expect("Failed to create provider");
-        // Arial should always be available on Windows
-        let result = provider.query_font("Arial", None);
+        let result = provider.query_font("Arial");
         assert!(result.is_ok());
         let font_data = result.unwrap();
         assert!(!font_data.data.is_empty());
@@ -248,29 +215,7 @@ mod tests {
     #[test]
     fn test_query_nonexistent_font() {
         let provider = WindowsFontProvider::new().expect("Failed to create provider");
-        let result = provider.query_font("ThisFontDefinitelyDoesNotExist12345", None);
+        let result = provider.query_font("ThisFontDefinitelyDoesNotExist12345");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_default_sans() {
-        let provider = WindowsFontProvider::new().expect("Failed to create provider");
-        let result = provider.default_sans();
-        // Should succeed with one of the fallback fonts
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_default_monospace() {
-        let provider = WindowsFontProvider::new().expect("Failed to create provider");
-        let result = provider.default_monospace();
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_default_serif() {
-        let provider = WindowsFontProvider::new().expect("Failed to create provider");
-        let result = provider.default_serif();
-        assert!(result.is_ok());
     }
 }

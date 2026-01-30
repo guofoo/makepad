@@ -644,30 +644,20 @@ impl LiveHook for FontFamily {
             }
 
             // System font fallback for CJK when system-fonts feature is enabled
-            // Note: PingFang SC on macOS is a stub font without outlines, use STHeiti instead
-            #[cfg(all(feature = "system-fonts", target_os = "macos"))]
+            #[cfg(feature = "system-fonts")]
             {
+                // Platform-specific CJK font names
+                // Note: PingFang SC on macOS is a stub font without outlines, use STHeiti instead
+                #[cfg(target_os = "macos")]
+                const CJK_FONT_NAME: &str = "STHeiti";
+                #[cfg(target_os = "windows")]
+                const CJK_FONT_NAME: &str = "Microsoft YaHei";
+                #[cfg(target_os = "linux")]
+                const CJK_FONT_NAME: &str = "Noto Sans CJK SC";
+
                 let cjk_font_id: FontId = "SystemCJKFallback".into();
                 if !fonts.is_font_known(cjk_font_id) {
-                    // Note: PingFang SC is a stub font without glyph outlines
-                    // Use STHeiti which has proper TrueType outlines
-                    fonts.define_font(cjk_font_id, FontDefinition::from_system("STHeiti"));
-                }
-                font_ids.push(cjk_font_id);
-            }
-            #[cfg(all(feature = "system-fonts", target_os = "windows"))]
-            {
-                let cjk_font_id: FontId = "SystemCJKFallback".into();
-                if !fonts.is_font_known(cjk_font_id) {
-                    fonts.define_font(cjk_font_id, FontDefinition::from_system("Microsoft YaHei"));
-                }
-                font_ids.push(cjk_font_id);
-            }
-            #[cfg(all(feature = "system-fonts", target_os = "linux"))]
-            {
-                let cjk_font_id: FontId = "SystemCJKFallback".into();
-                if !fonts.is_font_known(cjk_font_id) {
-                    fonts.define_font(cjk_font_id, FontDefinition::from_system("Noto Sans CJK SC"));
+                    fonts.define_font(cjk_font_id, FontDefinition::from_system(CJK_FONT_NAME));
                 }
                 font_ids.push(cjk_font_id);
             }

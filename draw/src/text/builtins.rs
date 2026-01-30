@@ -51,74 +51,32 @@ pub fn define(loader: &mut Loader) {
 
 #[cfg(all(feature = "system-fonts", not(feature = "bundled-fonts")))]
 pub fn define(loader: &mut Loader) {
-    // Platform-specific system font definitions with CJK fallback
+    // Platform-specific font names
+    // Note: PingFang SC on macOS is a stub font without glyph outlines, use STHeiti instead
     #[cfg(target_os = "macos")]
-    {
-        loader.define_font_family(
-            "Sans".into(),
-            FontFamilyDefinition {
-                font_ids: [
-                    "System Sans".into(),
-                    "System CJK".into(),
-                ].into(),
-            },
-        );
-        loader.define_font_family(
-            "Monospace".into(),
-            FontFamilyDefinition {
-                font_ids: ["System Mono".into()].into(),
-            },
-        );
-        loader.define_font("System Sans".into(), FontDefinition::from_system("Helvetica Neue"));
-        // Note: PingFang SC is a stub font without glyph outlines (macOS renders via private APIs)
-        // Use STHeiti which has proper TrueType outlines
-        loader.define_font("System CJK".into(), FontDefinition::from_system("STHeiti"));
-        loader.define_font("System Mono".into(), FontDefinition::from_system("Menlo"));
-    }
-
+    const FONTS: (&str, &str, &str) = ("Helvetica Neue", "STHeiti", "Menlo");
     #[cfg(target_os = "windows")]
-    {
-        loader.define_font_family(
-            "Sans".into(),
-            FontFamilyDefinition {
-                font_ids: [
-                    "System Sans".into(),
-                    "System CJK".into(),
-                ].into(),
-            },
-        );
-        loader.define_font_family(
-            "Monospace".into(),
-            FontFamilyDefinition {
-                font_ids: ["System Mono".into()].into(),
-            },
-        );
-        loader.define_font("System Sans".into(), FontDefinition::from_system("Segoe UI"));
-        loader.define_font("System CJK".into(), FontDefinition::from_system("Microsoft YaHei"));
-        loader.define_font("System Mono".into(), FontDefinition::from_system("Consolas"));
-    }
-
+    const FONTS: (&str, &str, &str) = ("Segoe UI", "Microsoft YaHei", "Consolas");
     #[cfg(target_os = "linux")]
-    {
-        loader.define_font_family(
-            "Sans".into(),
-            FontFamilyDefinition {
-                font_ids: [
-                    "System Sans".into(),
-                    "System CJK".into(),
-                ].into(),
-            },
-        );
-        loader.define_font_family(
-            "Monospace".into(),
-            FontFamilyDefinition {
-                font_ids: ["System Mono".into()].into(),
-            },
-        );
-        loader.define_font("System Sans".into(), FontDefinition::from_system("DejaVu Sans"));
-        loader.define_font("System CJK".into(), FontDefinition::from_system("Noto Sans CJK SC"));
-        loader.define_font("System Mono".into(), FontDefinition::from_system("DejaVu Sans Mono"));
-    }
+    const FONTS: (&str, &str, &str) = ("DejaVu Sans", "Noto Sans CJK SC", "DejaVu Sans Mono");
+
+    let (sans_font, cjk_font, mono_font) = FONTS;
+
+    loader.define_font_family(
+        "Sans".into(),
+        FontFamilyDefinition {
+            font_ids: ["System Sans".into(), "System CJK".into()].into(),
+        },
+    );
+    loader.define_font_family(
+        "Monospace".into(),
+        FontFamilyDefinition {
+            font_ids: ["System Mono".into()].into(),
+        },
+    );
+    loader.define_font("System Sans".into(), FontDefinition::from_system(sans_font));
+    loader.define_font("System CJK".into(), FontDefinition::from_system(cjk_font));
+    loader.define_font("System Mono".into(), FontDefinition::from_system(mono_font));
 }
 
 #[cfg(not(any(feature = "bundled-fonts", feature = "system-fonts")))]
