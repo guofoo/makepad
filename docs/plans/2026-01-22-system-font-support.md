@@ -205,6 +205,11 @@ cargo run -p makepad-example-ui-zoo --no-default-features --features system-font
 | `widgets/src/theme_desktop_dark.rs` | Removed chinese/emoji font refs |
 | `widgets/src/theme_desktop_light.rs` | Removed chinese/emoji font refs |
 | `widgets/src/theme_desktop_skeleton.rs` | Removed chinese/emoji font refs |
+| `draw/src/shader/draw_text.rs` | CJK fallback injection with platform constants |
+| `draw/src/text/builtins.rs` | Programmatic font definitions with platform tuple constants |
+| `draw/src/text/loader.rs` | Scoped `SystemFontProvider` import |
+| `platform/src/os/windows/system_fonts.rs` | Fixed trait interface, simplified error handling |
+| `platform/src/os/mod.rs` | Removed dead code |
 
 ## CJK Font Fallback
 
@@ -212,7 +217,25 @@ When using `system-fonts`, CJK (Chinese/Japanese/Korean) text rendering requires
 
 ### Automatic CJK Fallback Injection
 
-The system automatically adds CJK fallback fonts to all DSL-defined font families when `system-fonts` is enabled. This happens in `draw/src/shader/draw_text.rs` during font family initialization.
+The system automatically adds CJK fallback fonts to all DSL-defined font families when `system-fonts` is enabled. This happens in `draw/src/shader/draw_text.rs` during font family initialization using consolidated platform constants:
+
+```rust
+#[cfg(feature = "system-fonts")]
+{
+    #[cfg(target_os = "macos")]
+    const CJK_FONT_NAME: &str = "STHeiti";
+    #[cfg(target_os = "windows")]
+    const CJK_FONT_NAME: &str = "Microsoft YaHei";
+    #[cfg(target_os = "linux")]
+    const CJK_FONT_NAME: &str = "Noto Sans CJK SC";
+
+    let cjk_font_id: FontId = "SystemCJKFallback".into();
+    if !fonts.is_font_known(cjk_font_id) {
+        fonts.define_font(cjk_font_id, FontDefinition::from_system(CJK_FONT_NAME));
+    }
+    font_ids.push(cjk_font_id);
+}
+```
 
 ### Platform-Specific CJK Fonts
 
@@ -301,3 +324,37 @@ math_widget = { path = "../makepad-fonts/libs/math_widget" }
 1. Verify font is installed: `system_profiler SPFontsDataType | grep FontName`
 2. Check font file permissions
 3. On Linux, ensure fontconfig is installed and configured
+
+## Code Patterns
+
+### Platform Constant Pattern
+
+To avoid code duplication across platforms, both `draw_text.rs` and `builtins.rs` use platform-specific constants:
+
+**Single constant (draw_text.rs):**
+```rust
+#[cfg(target_os = "macos")]
+const CJK_FONT_NAME: &str = "STHeiti";
+#[cfg(target_os = "windows")]
+const CJK_FONT_NAME: &str = "Microsoft YaHei";
+#[cfg(target_os = "linux")]
+const CJK_FONT_NAME: &str = "Noto Sans CJK SC";
+
+// Single block of code uses CJK_FONT_NAME
+```
+
+**Tuple constant (builtins.rs):**
+```rust
+// (sans_font, cjk_font, mono_font)
+#[cfg(target_os = "macos")]
+const FONTS: (&str, &str, &str) = ("Helvetica Neue", "STHeiti", "Menlo");
+#[cfg(target_os = "windows")]
+const FONTS: (&str, &str, &str) = ("Segoe UI", "Microsoft YaHei", "Consolas");
+#[cfg(target_os = "linux")]
+const FONTS: (&str, &str, &str) = ("DejaVu Sans", "Noto Sans CJK SC", "DejaVu Sans Mono");
+
+let (sans_font, cjk_font, mono_font) = FONTS;
+// Single block of font registration code
+```
+
+This pattern reduces code duplication from ~3x (one block per platform) to a single implementation with platform-specific constants.
