@@ -9,6 +9,7 @@ use crate::vm::*;
 use crate::opcode::*;
 use crate::shader::*;
 use crate::shader_tables::*;
+use crate::suggest::format_pod_type_name;
 use crate::*;
 
 impl ShaderFnCompiler {
@@ -57,20 +58,65 @@ impl ShaderFnCompiler {
         }
         false
     }
+    
+    /// Find an outer IfBody's phi variable (skipping the innermost IfBody) and mark it as assigned.
+    /// Used when an inner if-block (like in match/else-if chains) has a value but no phi,
+    /// and we need to assign to an outer phi instead.
+    /// Returns the phi name if found, and sets `phi_assigned_by_inner` on the outer IfBody.
+    pub(crate) fn find_and_mark_outer_phi(&mut self) -> Option<String> {
+        let mut skipped_first_if = false;
+        for me in self.mes.iter_mut().rev() {
+            if let ShaderMe::IfBody { phi, phi_assigned_by_inner, .. } = me {
+                if !skipped_first_if {
+                    // Skip the innermost IfBody (the one we're closing)
+                    skipped_first_if = true;
+                    continue;
+                }
+                // Found an outer IfBody - return its phi if present and mark it
+                if let Some(phi) = phi {
+                    *phi_assigned_by_inner = true;
+                    return Some(phi.clone());
+                }
+            }
+        }
+        None
+    }
 
     pub(crate) fn handle_if_else_phi(&mut self, vm: &ScriptVm, output: &ShaderOutput) {
-        if let Some(ShaderMe::IfBody { target_ip, phi, start_pos, stack_depth, phi_type, has_return, if_branch_returned }) = self.mes.last() {
-            if self.trap.ip.index >= *target_ip {
+        // Loop to handle ALL IfBodies whose target_ip has been reached.
+        // This is important for match/else-if chains where multiple ifs end at the same position.
+        loop {
+            // Check if the last me is an IfBody that needs closing
+            let should_handle = if let Some(ShaderMe::IfBody { target_ip, .. }) = self.mes.last() {
+                self.trap.ip.index >= *target_ip
+            } else {
+                false
+            };
+            
+            if !should_handle {
+                break;
+            }
+            
+            // Now extract the fields we need (we know it's an IfBody that needs handling)
+            if let Some(ShaderMe::IfBody { target_ip: _, phi, start_pos, stack_depth, phi_type, has_return, if_branch_returned, phi_assigned_by_inner, created_unreachable: _ }) = self.mes.last() {
                 // Check if both branches returned (escape analysis)
                 let both_returned = *if_branch_returned && *has_return;
+                
+                // Clone/copy what we need before any mutable operations
+                let phi = phi.clone();
+                let start_pos = *start_pos;
+                let stack_depth = *stack_depth;
+                let phi_type = phi_type.clone();
+                let has_return = *has_return;
+                let phi_assigned_by_inner = *phi_assigned_by_inner;
 
-                if self.stack.types.len() > *stack_depth {
+                if self.stack.types.len() > stack_depth {
                     // Else branch has a value on the stack
                     let (ty, val) = self.stack.pop(self.trap.pass());
                     
                     // Check if the else value is void
-                    let else_concrete = ty.make_concrete(&vm.code.builtins.pod);
-                    let else_is_void = else_concrete.map(|t| t == vm.code.builtins.pod.pod_void).unwrap_or(false);
+                    let else_concrete = ty.make_concrete(&vm.bx.code.builtins.pod);
+                    let else_is_void = else_concrete.map(|t| t == vm.bx.code.builtins.pod.pod_void).unwrap_or(false);
                     
                     if else_is_void {
                         // Emit void value as statement
@@ -78,56 +124,72 @@ impl ShaderFnCompiler {
                             self.out.push_str(&val);
                             self.out.push_str(";\n");
                         }
-                    } else if let Some(phi) = phi {
-                        if let Some(phi_type) = phi_type {
+                    } else if let Some(ref phi) = phi {
+                        if let Some(ref phi_type) = phi_type {
                             // declare the phi at start
-                            let ty = type_table_if_else(phi_type, &ty, self.trap.pass(), &vm.code.builtins.pod);
-                            let ty = ty.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+                            let ty = type_table_if_else(phi_type, &ty, self.trap.pass(), &vm.bx.code.builtins.pod);
+                            let ty = ty.make_concrete(&vm.bx.code.builtins.pod).unwrap_or(vm.bx.code.builtins.pod.pod_void);
                             
                             // Skip phi handling if type is void
-                            if ty != vm.code.builtins.pod.pod_void {
+                            if ty != vm.bx.code.builtins.pod.pod_void {
                                 self.out.push_str(&format!("{} = {};\n", phi, val));
-                                let ty_name = if let Some(name) = vm.heap.pod_type_name(ty) {
+                                let ty_name = if let Some(name) = vm.bx.heap.pod_type_name(ty) {
                                     output.backend.map_pod_name(name)
                                 } else {
                                     id!(unknown)
                                 };
-                                // Generate backend-appropriate variable declaration
+                                // Generate backend-appropriate variable declaration with zero init
                                 let mut s = self.stack.new_string();
-                                output.backend.write_var_decl(&mut s, ty_name, phi);
-                                self.out.insert_str(*start_pos, &s);
+                                output.backend.write_var_decl_zero_init(&mut s, ty_name, phi);
+                                self.out.insert_str(start_pos, &s);
                                 self.stack.free_string(s);
                                 let mut s = self.stack.new_string();
                                 write!(s, "{}", phi).ok();
                                 self.stack.push(self.trap.pass(), ShaderType::Pod(ty), s);
                             }
                         }
+                    } else {
+                        // No phi for this IfBody, but we have a non-void value.
+                        // This happens in match/else-if chains where inner if has no else.
+                        // Look for an outer IfBody's phi to assign to.
+                        let outer_phi = self.find_and_mark_outer_phi();
+                        if let Some(outer_phi) = outer_phi {
+                            // Assign to the outer phi (flag is already set by find_and_mark_outer_phi)
+                            self.out.push_str(&format!("{} = {};\n", outer_phi, val));
+                        }
+                        // If no outer phi, the value is discarded (this shouldn't happen in well-formed code)
                     }
                     self.stack.free_string(val);
-                } else if let Some(phi) = phi {
-                    // If branch had a value (created phi) but else branch has no value.
-                    // The phi assignment was already written in handle_if_else, so we must
-                    // declare the phi variable to make the shader code valid.
-                    // However, since only one branch has a value, we can't use this as
-                    // an expression result, so we don't push it onto the stack.
-                    if let Some(phi_type) = phi_type {
-                        let ty = phi_type.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+                } else if let Some(ref phi) = phi {
+                    // If branch had a value (created phi) but else branch has no value on stack.
+                    // This can happen in two cases:
+                    // 1. Only if-branch has value (else is statement-only) - don't push result
+                    // 2. Inner if assigned to our phi (match/else-if) - push result
+                    if let Some(ref phi_type) = phi_type {
+                        let ty = phi_type.make_concrete(&vm.bx.code.builtins.pod).unwrap_or(vm.bx.code.builtins.pod.pod_void);
                         
                         // Skip phi handling if type is void
-                        if ty != vm.code.builtins.pod.pod_void {
-                            let ty_name = if let Some(name) = vm.heap.pod_type_name(ty) {
+                        if ty != vm.bx.code.builtins.pod.pod_void {
+                            let ty_name = if let Some(name) = vm.bx.heap.pod_type_name(ty) {
                                 output.backend.map_pod_name(name)
                             } else {
                                 id!(unknown)
                             };
-                            // Generate backend-appropriate variable declaration
+                            // Generate backend-appropriate variable declaration with zero init
                             let mut s = self.stack.new_string();
-                            output.backend.write_var_decl(&mut s, ty_name, phi);
-                            self.out.insert_str(*start_pos, &s);
+                            output.backend.write_var_decl_zero_init(&mut s, ty_name, phi);
+                            self.out.insert_str(start_pos, &s);
                             self.stack.free_string(s);
+                            
+                            // If inner code assigned to our phi, push the result onto the stack
+                            if phi_assigned_by_inner {
+                                let mut s = self.stack.new_string();
+                                write!(s, "{}", phi).ok();
+                                self.stack.push(self.trap.pass(), ShaderType::Pod(ty), s);
+                            }
                         }
                     }
-                } else if *has_return {
+                } else if has_return {
                     // If branch had a return with no else branch and no phi value.
                     // The following POP_TO_ME opcode expects a value but there isn't one.
                     // Skip it to avoid stack underflow.
@@ -152,6 +214,9 @@ impl ShaderFnCompiler {
                         }
                     }
                 }
+            } else {
+                // Shouldn't happen since we checked above
+                break;
             }
         }
     }
@@ -173,6 +238,8 @@ impl ShaderFnCompiler {
             phi_type: None,
             has_return: false,
             if_branch_returned: false,
+            phi_assigned_by_inner: false,
+            created_unreachable: false,
         });
     }
 
@@ -181,6 +248,7 @@ impl ShaderFnCompiler {
     pub(crate) fn handle_if_test_unreachable(&mut self, opargs: OpcodeArgs) {
         // Don't pop from stack or generate code - just track the structure
         // Mark has_return: true since we're already in unreachable code
+        // Mark created_unreachable: true so we don't emit closing } later
         self.mes.push(ShaderMe::IfBody {
             target_ip: self.trap.ip.index + opargs.to_u32(),
             start_pos: self.out.len(),
@@ -189,6 +257,8 @@ impl ShaderFnCompiler {
             phi_type: None,
             has_return: true, // Already unreachable, so this branch is "returned"
             if_branch_returned: false,
+            phi_assigned_by_inner: false,
+            created_unreachable: true, // No code emitted for this if block
         });
     }
 
@@ -201,13 +271,15 @@ impl ShaderFnCompiler {
             phi_type,
             has_return,
             if_branch_returned,
+            phi_assigned_by_inner: _,
+            created_unreachable: _,
         }) = self.mes.last_mut()
         {
             if self.stack.types.len() > *stack_depth {
                 let (ty, val) = self.stack.pop(self.trap.pass());
                 // Check if the type is void - if so, don't create a phi, just emit as statement
-                let concrete_ty = ty.make_concrete(&vm.code.builtins.pod);
-                let is_void = concrete_ty.map(|t| t == vm.code.builtins.pod.pod_void).unwrap_or(false);
+                let concrete_ty = ty.make_concrete(&vm.bx.code.builtins.pod);
+                let is_void = concrete_ty.map(|t| t == vm.bx.code.builtins.pod.pod_void).unwrap_or(false);
                 
                 if is_void {
                     // Emit as statement without phi assignment
@@ -259,13 +331,17 @@ impl ShaderFnCompiler {
 
     /// Handle if/else phi when in unreachable code - close the structure properly
     pub(crate) fn handle_if_else_phi_unreachable(&mut self) {
-        if let Some(ShaderMe::IfBody { target_ip, has_return, if_branch_returned, .. }) = self.mes.last() {
+        if let Some(ShaderMe::IfBody { target_ip, has_return, if_branch_returned, created_unreachable, .. }) = self.mes.last() {
             if self.trap.ip.index >= *target_ip {
                 let both_returned = *if_branch_returned && *has_return;
+                let was_created_unreachable = *created_unreachable;
                 
-                // Still need to close the if block in generated code and exit scope
-                self.out.push_str("}\n");
-                self.shader_scope.exit_scope();
+                // Only emit closing brace if code was actually generated for this if block
+                // If created_unreachable is true, no `if(...){` was emitted, so no `}` needed
+                if !was_created_unreachable {
+                    self.out.push_str("}\n");
+                    self.shader_scope.exit_scope();
+                }
                 self.mes.pop();
 
                 // If both branches returned, propagate up
@@ -310,10 +386,10 @@ impl ShaderFnCompiler {
         // Pop and resolve the return value BEFORE borrowing self.mes mutably
         // Use pop_resolved to resolve Id types (like variable names) to their actual Pod types
         let (ty, s) = if opargs.is_nil() {
-            (vm.code.builtins.pod.pod_void, self.stack.new_string())
+            (vm.bx.code.builtins.pod.pod_void, self.stack.new_string())
         } else {
             let (ty, s) = self.pop_resolved(vm, output);
-            let ty = ty.make_concrete(&vm.code.builtins.pod).unwrap_or(vm.code.builtins.pod.pod_void);
+            let ty = ty.make_concrete(&vm.bx.code.builtins.pod).unwrap_or(vm.bx.code.builtins.pod.pod_void);
             (ty, s)
         };
 
@@ -327,7 +403,7 @@ impl ShaderFnCompiler {
                 }
                 *ret = Some(ty);
 
-                if ty == vm.code.builtins.pod.pod_void {
+                if ty == vm.bx.code.builtins.pod.pod_void {
                     self.out.push_str(&s);
                     self.out.push_str(";\nreturn;\n");
                 } else {
@@ -360,11 +436,20 @@ impl ShaderFnCompiler {
         // when to stop, rather than relying on the Return trap.
     }
 
-    pub(crate) fn handle_for_1(&mut self) {
+    pub(crate) fn handle_for_1(&mut self, vm: &mut ScriptVm) {
         let (source, _) = self.stack.pop(self.trap.pass());
         let (val_id, _) = self.stack.pop(self.trap.pass());
-        if let ShaderType::Range { start, end, ty } = source {
+        if let ShaderType::Range { start, end, mut ty } = source {
             if let ShaderType::Id(id) = val_id {
+                // Shader for loops only support u32 for now.
+                // If the range is abstract int or i32, we cast it to u32.
+                if ty == vm.bx.code.builtins.pod.pod_i32 {
+                     ty = vm.bx.code.builtins.pod.pod_u32;
+                }
+                
+                if ty != vm.bx.code.builtins.pod.pod_u32 {
+                    script_err_type_mismatch!(self.trap, "shader for loop only supports u32 range, got {}", format_pod_type_name(&vm.bx.heap, ty));
+                }
                 self.shader_scope.enter_scope();
                 self.shader_scope.define_var(id, ty);
                 write!(self.out, "for(var {0} = {1}; {0} < {2}; {0}++){{\n", id, start, end).ok();
@@ -394,12 +479,12 @@ impl ShaderFnCompiler {
         let (end_ty, end_s) = self.stack.pop(self.trap.pass());
         let (start_ty, start_s) = self.stack.pop(self.trap.pass());
         // Validate that both operands can be made into concrete numeric types
-        let start_concrete = start_ty.make_concrete(&vm.code.builtins.pod);
-        let end_concrete = end_ty.make_concrete(&vm.code.builtins.pod);
+        let start_concrete = start_ty.make_concrete(&vm.bx.code.builtins.pod);
+        let end_concrete = end_ty.make_concrete(&vm.bx.code.builtins.pod);
         if let (Some(start_pod), Some(end_pod)) = (start_concrete, end_concrete) {
             // Check that both are numeric types
-            let start_is_number = vm.heap.pod_type_ref(start_pod).ty.is_number();
-            let end_is_number = vm.heap.pod_type_ref(end_pod).ty.is_number();
+            let start_is_number = vm.bx.heap.pod_type_ref(start_pod).ty.is_number();
+            let end_is_number = vm.bx.heap.pod_type_ref(end_pod).ty.is_number();
             if !start_is_number || !end_is_number {
                 self.stack.free_string(start_s);
                 self.stack.free_string(end_s);

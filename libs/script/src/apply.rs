@@ -176,13 +176,12 @@ impl<'a,'b> Scope<'a,'b>{
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Apply {
+    #[default]
     New,
     Reload,
-    Update,
     Animate,
+    Eval,
     Default(usize),
-    #[default]
-    Over,
 }
 
 impl Apply {
@@ -190,29 +189,15 @@ impl Apply {
         match self {
             Self::New => true,
             Self::Reload => true,
-            Self::Update => true,
+            Self::Eval => true,
             _ => false
         }
     }
     
-    pub fn is_from_rust(&self) -> bool {
-        match self {
-            Self::Animate => true,
-            Self::Over => true,
-            _ => false
-        }
-    }
 
     pub fn is_new(&self) -> bool {
         match self {
             Self::New => true,
-            _ => false
-        }
-    }
-    
-    pub fn is_update(&self) -> bool {
-        match self {
-            Self::Update => true,
             _ => false
         }
     }
@@ -231,9 +216,9 @@ impl Apply {
         }
     }
     
-    pub fn is_over(&self) -> bool {
+    pub fn is_eval(&self) -> bool {
         match self {
-            Self::Over => true,
+            Self::Eval => true,
             _ => false
         }
     }

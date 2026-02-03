@@ -1,13 +1,11 @@
-use {
-    crate::makepad_platform::*
-};
+use crate::makepad_platform::*;
 
 script_mod! {
     use mod.prelude.widgets_internal.*
     use mod.widgets.ViewOptimize
-    
+
     mod.widgets.View =  mod.widgets.ViewBase {}
-    
+
     mod.widgets.Hr = mod.widgets.View {
         width: Fill
         height: theme.space_2 * 7.5
@@ -16,8 +14,8 @@ script_mod! {
 
         show_bg: true
         draw_bg +: {
-            color: uniform(theme.color_bevel_outset_2)
-            color_2: uniform(theme.color_bevel_outset_1)
+            color: instance(theme.color_bevel_outset_2)
+            color_2: instance(theme.color_bevel_outset_1)
             border_size: uniform(theme.beveling)
 
             pixel: fn() {
@@ -37,7 +35,7 @@ script_mod! {
                     0
                     self.rect_size.y * 0.5 - sz
                     self.rect_size.x
-                    sz 
+                    sz
                 )
 
                 sdf.fill(self.color_2)
@@ -45,7 +43,7 @@ script_mod! {
             }
         }
     }
-    
+
     mod.widgets.Vr = mod.widgets.View {
         width: theme.space_2 * 2.
         height: Fill
@@ -53,8 +51,8 @@ script_mod! {
 
         show_bg: true
         draw_bg +: {
-            color: uniform(theme.color_bevel_outset_2)
-            color_2: uniform(theme.color_bevel_outset_1)
+            color: instance(theme.color_bevel_outset_2)
+            color_2: instance(theme.color_bevel_outset_1)
             border_size: uniform(theme.beveling)
 
             pixel: fn() {
@@ -83,18 +81,18 @@ script_mod! {
             }
         }
     }
-    
+
     mod.widgets.Filler = mod.widgets.View { width: Fill height: Fill }
-    
+
     mod.widgets.SolidView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
 
             get_color: fn() {
                 return self.color
             }
-                    
+
             pixel: fn() {
                 return Pal.premul(self.get_color())
             }
@@ -105,18 +103,18 @@ script_mod! {
         show_bg: true
 
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             border_size: uniform(0.0)
             border_inset: uniform(vec4(0))
             gradient_fill_horizontal: uniform(0.0)
             gradient_border_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
 
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
-                        
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -150,27 +148,27 @@ script_mod! {
             }
         }
     }
-        
+
     mod.widgets.RectShadowView = mod.widgets.ViewBase {
         clip_x: false
         clip_y: false
-                
+
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             border_size: uniform(0.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
-            border_color: uniform(#f00)
-            border_color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
+            border_color: instance(#f00)
+            border_color_2: instance(vec4(-1))
 
-            shadow_color: uniform(#0007)
+            shadow_color: instance(#0007)
             shadow_offset: uniform(vec2(0))
             shadow_radius: uniform(10.0)
-            
+
             rect_size2: varying(vec2(0))
             rect_size3: varying(vec2(0))
             sdf_rect_pos: varying(vec2(0))
@@ -188,7 +186,7 @@ script_mod! {
                 self.sdf_rect_pos = -min_offset + vec2(self.border_size + self.shadow_radius)
                 return self.clip_and_transform_vertex(self.rect_pos2 self.rect_size3)
             }
-                                                
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size3)
 
@@ -210,7 +208,7 @@ script_mod! {
                     self.sdf_rect_pos.x
                     self.sdf_rect_pos.y
                     self.sdf_rect_size.x
-                    self.sdf_rect_size.y 
+                    self.sdf_rect_size.y
                 )
                 if sdf.shape > -1.0 {
                     let m = self.shadow_radius
@@ -218,7 +216,7 @@ script_mod! {
                     let v = GaussShadow.box_shadow(vec2(m) + o self.rect_size2+o self.pos * (self.rect_size3+vec2(m)) m*0.5)
                     sdf.clear(self.shadow_color*v)
                 }
-                                                                
+
                 sdf.fill_keep(fill_color)
                 if self.border_size > 0.0 {
                     sdf.stroke(stroke_color self.border_size)
@@ -227,35 +225,35 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.RoundedShadowView = mod.widgets.ViewBase {
         clip_x: false
         clip_y: false
-                            
+
         show_bg: true
         draw_bg +: {
-            color: uniform(#8)
+            color: instance(#8)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
 
             border_radius: uniform(2.5)
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
 
-            shadow_color: uniform(#0007)
+            shadow_color: instance(#0007)
             shadow_radius: uniform(20.0)
             shadow_offset: uniform(vec2(0))
-            
+
             rect_size2: varying(vec2(0))
             rect_size3: varying(vec2(0))
             rect_pos2: varying(vec2(0))
             rect_shift: varying(vec2(0))
             sdf_rect_pos: varying(vec2(0))
             sdf_rect_size: varying(vec2(0))
-                                              
+
             vertex: fn() {
                 let min_offset = min(self.shadow_offset vec2(0))
                 self.rect_size2 = self.rect_size + 2.0*vec2(self.shadow_radius)
@@ -264,11 +262,11 @@ script_mod! {
                 self.sdf_rect_size = self.rect_size2 - vec2(self.shadow_radius * 2.0 + self.border_size * 2.0)
                 self.sdf_rect_pos = -min_offset + vec2(self.border_size + self.shadow_radius)
                 self.rect_shift = -min_offset
-                                                            
+
                 return self.clip_and_transform_vertex(self.rect_pos2 self.rect_size3)
             }
-                                                        
-            pixel: fn() {                                                
+
+            pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size3)
 
                 let mut fill_color = self.color
@@ -298,7 +296,7 @@ script_mod! {
                     let v = GaussShadow.rounded_box_shadow(vec2(m) + o self.rect_size2+o self.pos * (self.rect_size3+vec2(m)) self.shadow_radius*0.5 self.border_radius*2.0)
                     sdf.clear(self.shadow_color*v)
                 }
-                                                                    
+
                 sdf.fill_keep(fill_color)
 
                 if self.border_size > 0.0 {
@@ -308,22 +306,22 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.RoundedView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
             border_size: uniform(0.0)
             border_radius: uniform(2.5)
-            color_2: uniform(vec4(-1))
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
             border_inset: uniform(vec4(0))
-                                
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -356,23 +354,23 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.RoundedXView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
 
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
             border_inset: uniform(vec4(0))
             border_radius: uniform(vec2(2.5 2.5))
-                            
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -406,23 +404,23 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.RoundedYView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
 
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
             border_inset: uniform(vec4(0))
             border_radius: uniform(vec2(2.5 2.5))
-                                                        
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -459,22 +457,22 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.RoundedAllView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
             border_inset: uniform(vec4(0))
             border_radius: uniform(vec4(2.5))
-                            
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -491,7 +489,7 @@ script_mod! {
                     let dir = if self.gradient_border_horizontal > 0.5 self.pos.x else self.pos.y
                     stroke_color = mix(self.border_color self.border_color_2 dir + dither)
                 }
-                            
+
                 sdf.box_all(
                     self.border_inset.x + self.border_size
                     self.border_inset.y + self.border_size
@@ -513,21 +511,21 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.CircleView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
-            border_color_2: uniform(vec4(-1))
+            border_color: instance(#0000)
+            border_color_2: instance(vec4(-1))
             border_inset: uniform(vec4(0.0))
             border_radius: uniform(5.0)
-                            
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
 
@@ -544,7 +542,7 @@ script_mod! {
                     let dir = if self.gradient_border_horizontal > 0.5 self.pos.x else self.pos.y
                     stroke_color = mix(self.border_color self.border_color_2 dir + dither)
                 }
-                            
+
                 if self.border_radius > 0.0 {
                     sdf.circle(
                         self.rect_size.x * 0.5
@@ -573,26 +571,26 @@ script_mod! {
             }
         }
     }
-                
+
     mod.widgets.HexagonView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#0000)
+            color: instance(#0000)
             color_dither: uniform(1.0)
             gradient_border_horizontal: uniform(0.0)
             gradient_fill_horizontal: uniform(0.0)
 
-            color_2: uniform(vec4(-1))
-            border_color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
+            border_color_2: instance(vec4(-1))
 
             border_size: uniform(0.0)
-            border_color: uniform(#0000)
+            border_color: instance(#0000)
             border_inset: uniform(vec4(0.0))
             border_radius: uniform(vec2(0.0 1.0))
-                            
+
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                
+
                 let mut fill_color = self.color
                 if self.color_2.x > -0.5 {
                     let dither = Math.random_2d(self.pos.xy) * 0.04 * self.color_dither
@@ -630,19 +628,19 @@ script_mod! {
                 if self.border_size > 0.0 {
                     sdf.stroke(stroke_color self.border_size)
                 }
-                
+
                 return sdf.result
             }
         }
     }
-                
+
     mod.widgets.GradientXView = mod.widgets.ViewBase {
         show_bg: true
         draw_bg +: {
-            color: uniform(#00f)
+            color: instance(#00f)
             gradient_fill_horizontal: uniform(1.0)
             color_dither: uniform(1.0)
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
 
             get_color: fn() {
                 let mut fill_color = self.color
@@ -653,23 +651,23 @@ script_mod! {
                 }
                 return fill_color
             }
-                            
+
             pixel: fn() {
                 return Pal.premul(self.get_color())
             }
         }
     }
-                
+
     mod.widgets.GradientYView = mod.widgets.GradientXView {
         show_bg: true
         draw_bg +: {
-            color: uniform(#00f)
+            color: instance(#00f)
             gradient_fill_horizontal: uniform(0.0)
-            color_2: uniform(vec4(-1))
+            color_2: instance(vec4(-1))
             color_dither: uniform(1.0)
         }
     }
-                
+
     mod.widgets.CachedView = mod.widgets.ViewBase {
         optimize: ViewOptimize.Texture
         draw_bg +: {
@@ -689,23 +687,23 @@ script_mod! {
             }
         }
     }
-            
+
     mod.widgets.CachedRoundedView = mod.widgets.ViewBase {
         optimize: ViewOptimize.Texture
         draw_bg +: {
             border_size: uniform(0.0)
-            border_color: uniform(#000F)
+            border_color: instance(#000F)
             border_inset: uniform(vec4(0))
             border_radius: uniform(2.5)
-                                
+
             image: texture_2d(float)
             scale: varying(vec2(0))
             shift: varying(vec2(0))
-                                            
+
             get_border_color: fn() {
                 return self.border_color
             }
-                                        
+
             vertex: fn() {
                 let dpi = self.dpi_factor
                 let ceil_size = ceil(self.rect_size * dpi) / dpi
@@ -714,9 +712,9 @@ script_mod! {
                 self.shift = (self.rect_pos - floor_pos) / ceil_size
                 return self.clip_and_transform_vertex(self.rect_pos self.rect_size)
             }
-                                
+
             pixel: fn() {
-                                        
+
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 sdf.box(
                     self.border_inset.x + self.border_size
@@ -734,7 +732,7 @@ script_mod! {
             }
         }
     }
-    
+
     mod.widgets.CachedScrollXY = mod.widgets.CachedView {
         scroll_bars: mod.widgets.ScrollBars {
             show_scroll_x: true show_scroll_y: true
@@ -742,21 +740,21 @@ script_mod! {
             scroll_bar_y.drag_scrolling: true
         }
     }
-        
+
     mod.widgets.CachedScrollX = mod.widgets.CachedView {
         scroll_bars: mod.widgets.ScrollBars {
             show_scroll_x: true show_scroll_y: false
             scroll_bar_x.drag_scrolling: true
         }
     }
-        
+
     mod.widgets.CachedScrollY = mod.widgets.CachedView {
         scroll_bars: mod.widgets.ScrollBars {
             show_scroll_x: false show_scroll_y: true
             scroll_bar_y.drag_scrolling: true
         }
     }
-        
+
     mod.widgets.ScrollXYView = mod.widgets.ViewBase {
         scroll_bars: mod.widgets.ScrollBars {
             show_scroll_x: true show_scroll_y: true

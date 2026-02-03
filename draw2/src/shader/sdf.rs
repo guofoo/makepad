@@ -18,24 +18,24 @@ script_mod!{
             }
                         
             // This approximates the error function, needed for the gaussian integral
-            erf_vec2: fn(x0:vec2)->vec2 {
+            fn erf_vec2(x0:vec2)->vec2 {
                 let s = sign(x0);
                 let a = abs(x0);
-                let x1 = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+                let mut x1 = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
                 x1 *= x1;
                 return s - s / (x1 * x1);
             }
             
-            erf_vec4: fn(x0:vec4)->vec4 {
+            fn erf_vec4(x0:vec4)->vec4 {
                 let s = sign(x0);
                 let a = abs(x0);
-                let x1 = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+                let mut x1 = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
                 x1 *= x1;
                 return s - s / (x1 * x1);
             }
                         
             // Return the blurred mask along the x dimension
-            rounded_box_shadow_x: fn(x:float, y:float, sigma:float, corner:float, half_size:vec2)->float{
+            fn rounded_box_shadow_x(x:float, y:float, sigma:float, corner:float, half_size:vec2)->float{
                 let delta = min(half_size.y - corner - abs(y), 0.0);
                 let curved = half_size.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
                 let integral = 0.5 + 0.5 * erf_vec2((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
@@ -265,31 +265,37 @@ script_mod!{
             
             glow: fn(color: vec4, width: float) -> vec4 {
                 self.glow_keep(color, width);
-                self.old_shape = self.shape = 1e+20;
+                self.shape = 1e+20;
+                self.old_shape = self.shape;
                 self.clip = -1e+20;
                 self.has_clip = 0.;
                 return self.result;
             }
             
             union: fn() {
-                self.old_shape = self.shape = min(self.dist, self.old_shape);
+                self.shape = min(self.dist, self.old_shape);
+                self.old_shape = self.shape;
             }
             
             intersect: fn() {
-                self.old_shape = self.shape = max(self.dist, self.old_shape);
+                self.shape = max(self.dist, self.old_shape);
+                self.old_shape = self.shape;
             }
             
             subtract: fn() {
-                self.old_shape = self.shape = max(-self.dist, self.old_shape);
+                self.shape = max(-self.dist, self.old_shape);
+                self.old_shape = self.shape;
             }
             
             gloop: fn(k: float) {
                 let h = clamp(0.5 + 0.5 * (self.old_shape - self.dist) / k, 0.0, 1.0);
-                self.old_shape = self.shape = mix(self.old_shape, self.dist, h) - k * h * (1.0 - h);
+                self.shape = mix(self.old_shape, self.dist, h) - k * h * (1.0 - h);
+                self.old_shape = self.shape;
             }
             
             blend: fn(k: float) {
-                self.old_shape = self.shape = mix(self.old_shape, self.dist, k);
+                self.shape = mix(self.old_shape, self.dist, k);
+                self.old_shape = self.shape;
             }
             
             circle: fn(x: float, y: float, r: float) {
@@ -483,7 +489,7 @@ script_mod!{
             }
             
             move_to: fn(x: float, y: float) {
-                self.last_pos =
+                self.last_pos = vec2(x, y);
                 self.start_pos = vec2(x, y);
             }
             

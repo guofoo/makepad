@@ -87,9 +87,10 @@ impl Opcode{
     pub const GT:Self = Self(17);
     pub const LEQ:Self = Self(18);
     pub const GEQ:Self = Self(19);
-    pub const LOGIC_AND:Self = Self(20);
-    pub const LOGIC_OR:Self = Self(21);
-    pub const NIL_OR:Self = Self(22);
+    // Short-circuit evaluation opcodes (these replace simple binary ops)
+    pub const LOGIC_AND_TEST:Self = Self(20);  // If falsy, skip and keep value; else pop and continue
+    pub const LOGIC_OR_TEST:Self = Self(21);   // If truthy, skip and keep value; else pop and continue
+    pub const NIL_OR_TEST:Self = Self(22);     // If not nil, skip and keep value; else pop and continue
     pub const SHALLOW_EQ:Self = Self(23);
     pub const SHALLOW_NEQ:Self = Self(24);
          
@@ -210,6 +211,13 @@ impl Opcode{
     pub const VAR_TYPED:Self = Self(116);
     pub const VAR_DYN:Self = Self(117);
     pub const ME_SPLAT:Self = Self(125);
+    
+    // Destructuring opcodes
+    pub const DUP:Self = Self(126);
+    pub const DROP:Self = Self(127);
+    pub const LET_DESTRUCT_ARRAY_EL:Self = Self(128);  // arg = index; stack: [source, id] -> [source], binds id = source[index]
+    pub const LET_DESTRUCT_OBJECT_EL:Self = Self(129); // stack: [source, id] -> [source], binds id = source[id]
+    pub const ARRAY_INDEX_NIL:Self = Self(130);        // like ARRAY_INDEX but returns nil instead of error
 }
 
 
@@ -262,9 +270,9 @@ impl fmt::Display for Opcode {
             Self::GT => return write!(f, ">"),
             Self::LEQ => return write!(f, "<="),
             Self::GEQ => return write!(f, ">="),
-            Self::LOGIC_AND => return write!(f, "&&"),
-            Self::LOGIC_OR => return write!(f, "||"),
-            Self::NIL_OR => return write!(f, "|?"),
+            Self::LOGIC_AND_TEST => return write!(f, "&&?"),
+            Self::LOGIC_OR_TEST => return write!(f, "||?"),
+            Self::NIL_OR_TEST => return write!(f, "|??"),
             Self::SHALLOW_EQ => return write!(f, "==="),
             Self::SHALLOW_NEQ => return write!(f, "!=="),
                                                     
@@ -379,6 +387,11 @@ impl fmt::Display for Opcode {
             Self::OK_TEST=>return write!(f, "ok_test"),
             Self::OK_END=>return write!(f, "ok_end"),
             Self::ME_SPLAT=>return write!(f, "..splat"),
+            Self::DUP=>return write!(f, "dup"),
+            Self::DROP=>return write!(f, "drop"),
+            Self::LET_DESTRUCT_ARRAY_EL=>return write!(f, "let_arr_el"),
+            Self::LET_DESTRUCT_OBJECT_EL=>return write!(f, "let_obj_el"),
+            Self::ARRAY_INDEX_NIL=>return write!(f, "?[]"),
             _=>return write!(f, "OP{}",self.0)
         }
     }

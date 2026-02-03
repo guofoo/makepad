@@ -55,6 +55,16 @@ pub enum ShaderMe{
         phi_type: Option<ShaderType>,
         has_return: bool,         // true if current branch has a return
         if_branch_returned: bool, // remembers if the if-branch returned (used when in else)
+        phi_assigned_by_inner: bool, // true if an inner if assigned to this phi (for match/else-if chains)
+        created_unreachable: bool, // true if this IfBody was created while in unreachable code (no code emitted)
+    },
+    /// Logic operation (&&, ||) - for short-circuit bytecode handling in shaders
+    /// Shaders evaluate both operands and combine with the operator
+    LogicOp{
+        target_ip: u32,
+        op: &'static str,         // "&&" or "||"
+        first_operand: String,    // The first operand expression
+        first_type: ShaderType,   // The type of the first operand
     },
     BuiltinCall{name:LiveId, fnptr: NativeId, args:Vec<(ShaderType, String)>},
     /// Pod builtin method call: x.mix(y, a) -> mix(x, y, a)
@@ -340,22 +350,29 @@ impl ShaderFnCompiler{
         });
         // alright lets go trace the opcodes
         self.trap.ip = fnip;
-        let bodies = vm.code.bodies.borrow();
-        let body = &bodies[self.trap.ip.body as usize];
         
         // Calculate function end position from the FN_BODY_DYN opcode that precedes the function body
         // fnip.index points to the first opcode AFTER FN_BODY_DYN
         // FN_BODY_DYN's opargs contains the jump offset from its position to the end of the function
-        let fn_body_opcode = body.parser.opcodes[(fnip.index - 1) as usize];
-        let fn_end_index = if let Some((_opcode, args)) = fn_body_opcode.as_opcode() {
-            (fnip.index - 1) + args.to_u32()
-        } else {
-            // Fallback to opcodes.len() if we can't find FN_BODY_DYN
-            body.parser.opcodes.len() as u32
+        let fn_end_index = {
+            let bodies = vm.bx.code.bodies.borrow();
+            let body = &bodies[self.trap.ip.body as usize];
+            let fn_body_opcode = body.parser.opcodes[(fnip.index - 1) as usize];
+            if let Some((_opcode, args)) = fn_body_opcode.as_opcode() {
+                (fnip.index - 1) + args.to_u32()
+            } else {
+                // Fallback to opcodes.len() if we can't find FN_BODY_DYN
+                body.parser.opcodes.len() as u32
+            }
         };
         
         while self.trap.ip.index < fn_end_index {
-            let opcode = body.parser.opcodes[self.trap.ip.index as usize];
+            // Re-borrow bodies at each iteration to allow mutable vm access in method calls
+            let opcode = {
+                let bodies = vm.bx.code.bodies.borrow();
+                let body = &bodies[self.trap.ip.body as usize];
+                body.parser.opcodes[self.trap.ip.index as usize]
+            };
             
             // Skip processing when in unreachable code (after a return in current branch)
             // But still need to process control flow opcodes to maintain structure
@@ -381,18 +398,20 @@ impl ShaderFnCompiler{
             } else if let Some((opcode, args)) = opcode.as_opcode(){
                 self.opcode(vm, output, opcode, args);
                 self.trap.goto_next();
+                self.handle_logic_phi(vm, output);
                 self.handle_if_else_phi(vm, output);
             }
             else{ // id or immediate value
-                self.push_immediate(opcode, &vm.code.builtins.pod, &output.backend);
+                self.push_immediate(opcode, &vm.bx.code.builtins.pod, &output.backend);
                 self.trap.goto_next();
+                self.handle_logic_phi(vm, output);
                 self.handle_if_else_phi(vm, output);
             }
             // alright lets see if we have a trap, ifso we can log it
-            if let Some(err) = self.trap.err.borrow_mut().pop(){
+            if let Some(err) = self.trap.err.borrow_mut().pop_front(){
                 output.has_errors = true;
                 if let Some(ptr) = err.value.as_err(){
-                    if let Some(loc2) = vm.code.ip_to_loc(ptr.ip){
+                    if let Some(loc2) = vm.bx.code.ip_to_loc(ptr.ip){
                         log_with_level(&loc2.file, loc2.line, loc2.col, loc2.line, loc2.col, format!("{} ({}:{})",  err.message, err.origin_file, err.origin_line), LogLevel::Error);
                     }
                 }
@@ -404,7 +423,7 @@ impl ShaderFnCompiler{
         }
         let value = self.mes.pop();
         if let Some(ShaderMe::FnBody{ret, ..}) = value{
-            return ret.unwrap_or(vm.code.builtins.pod.pod_void)
+            return ret.unwrap_or(vm.bx.code.builtins.pod.pod_void)
         }
         panic!("Unexpected ME at end {:?}", value)
     }
@@ -438,16 +457,16 @@ impl ShaderFnCompiler{
                 }
                 
                 // Not found in shader scope - try script scope for scope uniforms
-                let value = vm.heap.scope_value(self.script_scope, id.into(), self.trap.pass());
+                let value = vm.bx.heap.scope_value(self.script_scope, id.into(), self.trap.pass());
                 if !value.is_nil() && self.trap.err.borrow().is_empty() {
                     // Check if this is a shader_io type
                     if let Some(value_obj) = value.as_object() {
-                        if let Some(io_type) = vm.heap.as_shader_io(value_obj) {
+                        if let Some(io_type) = vm.bx.heap.as_shader_io(value_obj) {
                             // Uniform buffers from scope are supported
                             if io_type == SHADER_IO_UNIFORM_BUFFER {
                                 // Get the pod type from the prototype
-                                let proto_value = vm.heap.proto(value_obj);
-                                if let Some(pod_ty) = vm.heap.pod_type(proto_value) {
+                                let proto_value = vm.bx.heap.proto(value_obj);
+                                if let Some(pod_ty) = vm.bx.heap.pod_type(proto_value) {
                                     self.stack.free_string(s);
                                     return (ShaderType::ScopeUniformBuffer { obj: value_obj, pod_ty }, self.stack.new_string())
                                 } else if let Some(pod_ty) = proto_value.as_pod_type() {
@@ -542,7 +561,7 @@ impl ShaderFnCompiler{
                             });
                             // Also add to IO list
                             if !output.io.iter().any(|io| io.name == shader_name && matches!(io.kind, ShaderIoKind::ScopeUniform)) {
-                                vm.heap.pod_type_name_if_not_set(pod_ty, shader_name);
+                                vm.bx.heap.pod_type_name_if_not_set(pod_ty, shader_name);
                                 output.io.push(ShaderIo {
                                     kind: ShaderIoKind::ScopeUniform,
                                     name: shader_name,
@@ -578,16 +597,16 @@ impl ShaderFnCompiler{
     /// Get the pod type from a scope value, if it's a supported type
     pub(crate) fn get_scope_value_pod_type(&self, vm: &ScriptVm, value: ScriptValue) -> Option<ScriptPodType> {
         // Check if it's a primitive type (f32, f64, bool, etc.)
-        if let Some(pod_ty) = vm.code.builtins.pod.value_to_exact_type(value) {
+        if let Some(pod_ty) = vm.bx.code.builtins.pod.value_to_exact_type(value) {
             return Some(pod_ty);
         }
         // Check if it's a color - colors map to vec4f
         if value.is_color() {
-            return Some(vm.code.builtins.pod.pod_vec4f);
+            return Some(vm.bx.code.builtins.pod.pod_vec4f);
         }
         // Check if it's a pod instance
         if let Some(pod) = value.as_pod() {
-            let pod = &vm.heap.pods[pod.index as usize];
+            let pod = &vm.bx.heap.pods[pod.index as usize];
             return Some(pod.ty);
         }
         None
@@ -778,17 +797,17 @@ impl ShaderFnCompiler{
 
     pub(crate) fn ensure_struct_name(&self, vm: &mut ScriptVm, output: &mut ShaderOutput, pod_ty: ScriptPodType, used_name: LiveId) -> LiveId {
         // Always insert struct types into output.structs so they get defined in shader output
-        if let ScriptPodTy::Struct{..} = vm.heap.pod_type_ref(pod_ty).ty {
+        if let ScriptPodTy::Struct{..} = vm.bx.heap.pod_type_ref(pod_ty).ty {
             output.structs.insert(pod_ty);
         }
         
-        if let Some(name) = vm.heap.pod_type_name(pod_ty) {
+        if let Some(name) = vm.bx.heap.pod_type_name(pod_ty) {
             if name != used_name && used_name != id!(self) && used_name != id!(vec2) && used_name != id!(vec3) && used_name != id!(vec4) {
                 script_err_inconsistent!(self.trap, "struct name not consistent");
             }
             return name;
         }
-        vm.heap.pod_type_name_set(pod_ty, used_name);
+        vm.bx.heap.pod_type_name_set(pod_ty, used_name);
         used_name
     }
 
@@ -865,9 +884,9 @@ impl ShaderFnCompiler{
             Opcode::LEQ=>{self.handle_eq(vm, output, opargs, "<=");},
             Opcode::GEQ=>{self.handle_eq(vm, output, opargs, ">=");},
                         
-            Opcode::LOGIC_AND =>{self.handle_logic(vm, output, opargs, "&&");},
-            Opcode::LOGIC_OR =>{self.handle_logic(vm, output, opargs, "||");},
-            Opcode::NIL_OR =>{script_err_shader!(self.trap, "NIL_OR: null-coalescing `a ?? b` not supported in shaders");},
+            Opcode::LOGIC_AND_TEST =>{self.handle_logic_test(vm, output, opargs, "&&");},
+            Opcode::LOGIC_OR_TEST =>{self.handle_logic_test(vm, output, opargs, "||");},
+            Opcode::NIL_OR_TEST =>{script_err_shader!(self.trap, "NIL_OR_TEST: null-coalescing `a |? b` not supported in shaders");},
             Opcode::SHALLOW_EQ =>{script_err_shader!(self.trap, "SHALLOW_EQ: shallow equality `===` not supported in shaders");},
             Opcode::SHALLOW_NEQ=>{script_err_shader!(self.trap, "SHALLOW_NEQ: shallow inequality `!==` not supported in shaders");},
             // Object/Array begin
@@ -920,7 +939,7 @@ impl ShaderFnCompiler{
                 self.pop_to_me(vm);    
             },
 // Array index            
-            Opcode::ARRAY_INDEX=>{script_err_not_impl!(self.trap, "ARRAY_INDEX: dynamic array indexing `arr[expr]` not yet supported in shaders");},
+            Opcode::ARRAY_INDEX=>self.handle_array_index(vm, output),
 // Let                   
             Opcode::LET_DYN=>self.handle_let_dyn(vm, output, opargs),
             Opcode::LET_TYPED=>{script_err_not_impl!(self.trap, "LET_TYPED: typed let `let x: Type = ...` not yet supported in shaders, use `let x = Type(...)`");},
@@ -935,7 +954,7 @@ impl ShaderFnCompiler{
                         
             Opcode::SCOPE=>{script_err_shader!(self.trap, "SCOPE: `scope` keyword not supported in shaders");},
 // For            
-            Opcode::FOR_1 =>self.handle_for_1(),
+            Opcode::FOR_1 =>self.handle_for_1(vm),
             Opcode::FOR_2 =>{script_err_shader!(self.trap, "FOR_2: `for k, v in obj` iteration not supported in shaders, use `for i in 0..n`");},
             Opcode::FOR_3=>{script_err_shader!(self.trap, "FOR_3: `for i, k, v in obj` iteration not supported in shaders, use `for i in 0..n`");},
             Opcode::LOOP=>{script_err_not_impl!(self.trap, "LOOP: infinite `loop {{}}` not supported in shaders, use `for i in 0..n`");},
@@ -1000,20 +1019,20 @@ impl ShaderFnCompiler{
                          }
                          else{
                              script_err_not_found!(self.trap, "shader variable {:?} not found{}", id, suggest_from_live_ids(id, &self.shader_scope.all_var_names()));
-                             vm.code.builtins.pod.pod_void
+                             vm.bx.code.builtins.pod.pod_void
                          }
                     }
-                    else if let Some(ty) = ty.make_concrete(&vm.code.builtins.pod){
+                    else if let Some(ty) = ty.make_concrete(&vm.bx.code.builtins.pod){
                         ty
                     }
                     else{
                         script_err_shader!(self.trap, "no matching shader type");
-                        vm.code.builtins.pod.pod_void
+                        vm.bx.code.builtins.pod.pod_void
                     };
                     
                     if let Some(elem_ty) = elem_ty {
                         if *elem_ty != arg_ty {
-                             script_err_pod!(self.trap, "array element type mismatch: expected {}, got {}", format_pod_type_name(&vm.heap, *elem_ty), format_pod_type_name(&vm.heap, arg_ty));
+                             script_err_pod!(self.trap, "array element type mismatch: expected {}, got {}", format_pod_type_name(&vm.bx.heap, *elem_ty), format_pod_type_name(&vm.bx.heap, arg_ty));
                         }
                     }
                     else {
