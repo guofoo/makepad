@@ -4,6 +4,8 @@ use makepad_widgets::*;
 /// Everything one desktop style says about the shell's geometry and family
 /// behaviour, in one row. `StyleTween::mix` blends rows by the tween weights
 /// exactly as the literal arrays it replaces did. Numbers are logical px.
+/// Anything that blends through a tween goes in a spec field; a discrete
+/// family branch uses `DesktopStyle::mac_family()`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StyleSpec {
     pub style: DesktopStyle,
@@ -16,7 +18,8 @@ pub struct StyleSpec {
     /// Child inset from the tile rect: Omarchy's ring, the retro bevel frame,
     /// or MakeOS's glass ring — 2 × the material's 1 px border, since the
     /// stroke is centred one border-width in and a 1 px inset would show only
-    /// half of it. The desk applies MakeOS's only under a glass material.
+    /// half of it. A `glass_chrome` row's inset counts only under a glass
+    /// material (`StyleTween::frame_inset`).
     pub frame_inset: f64,
     /// Window corner rounding through the captured window surface.
     pub rounding: f64,
@@ -27,8 +30,9 @@ pub struct StyleSpec {
     pub shelf_radius: f64,
     /// Bottom resize bar height (NeXTSTEP).
     pub resize_bar: f64,
-    /// Window shadow opacity when focused; 0 = no shadow. Read as a presence
-    /// flag until the frame draws from the material.
+    /// Window shadow opacity when focused (unfocused is ×0.16/0.28, see
+    /// `StyleTween::window_shadow_opacity`); 0 = no shadow. The row owns the
+    /// window geometry, so the desk's shadow reads this, not the sheet.
     pub shadow: f64,
     pub glass_shelf: bool,
     /// The desk runs the backdrop compositor for this style.
@@ -50,6 +54,10 @@ pub struct StyleSpec {
     /// Chrome that is dark by identity, whatever the appearance flag says:
     /// MakeOS's sheet has no light look. Read through `dark_chrome`.
     pub dark_chrome: bool,
+    /// This style's chrome is the Liquid Glass material: the window frame,
+    /// the shelf pill and the kit's surfaces paint from the sheet's material
+    /// block. A second glass style needs only this flag.
+    pub glass_chrome: bool,
     /// The shelf stands along the screen edge (the NeXT dock) instead of
     /// lying along the bottom, so a tween into or out of it crossfades two
     /// shelves in place rather than morphing one rect.
@@ -71,6 +79,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 0.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     StyleSpec {
@@ -85,6 +94,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 98.0,
         dock_warp: true,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     StyleSpec {
@@ -99,6 +109,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 66.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     StyleSpec {
@@ -113,6 +124,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 34.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     StyleSpec {
@@ -127,6 +139,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 0.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: true,
     },
     // Phone modes draw no desktop chrome; every geometry number is 0.
@@ -142,6 +155,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 0.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     StyleSpec {
@@ -156,14 +170,20 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 0.0,
         dock_warp: false,
         dark_chrome: false,
+        glass_chrome: false,
         shelf_vertical: false,
     },
     // MakeOS floats like macOS: its dock overlays the desk rather than
     // reserving a strip, and the title bar and menu share macOS's placement.
     // Dark only, so both grounds are the same night gradient.
-    // rounding/shadow/frame_width are the compiled-in window geometry the desk
-    // draws; the sheet's material.corner_radius/shadow_alpha/border_width are the
-    // shell kit's hot-reloadable material. They join when the frame draws from it.
+    // The row owns the window geometry (rounding, frame_inset, shadow); the
+    // sheet's material block owns the kit's surfaces (cards, the shelf pill,
+    // the ring's look). The two sets of numbers are kept in agreement by
+    // hand: rounding 12 is the material's corner_radius, shadow 0.44 its
+    // shadow_alpha, frame_inset 2 is twice its border_width. The pane
+    // derives its child inset from material.border_width where a window
+    // uses the row's frame_inset; both round the child to "outer radius
+    // minus inset, halved".
     StyleSpec {
         style: DesktopStyle::MakeOs,
         tiling: false,
@@ -176,6 +196,7 @@ pub static SPECS: [StyleSpec; 8] = [
         menu_bottom_offset: 98.0,
         dock_warp: true,
         dark_chrome: true,
+        glass_chrome: true,
         shelf_vertical: false,
     },
 ];
@@ -270,19 +291,34 @@ impl StyleTween {
     pub fn window_shadow_opacity(&self, focus: f64, fade: f64) -> f32 {
         (self.mix(|s| s.shadow) * fade * if focus > 0.5 { 1.0 } else { 0.16 / 0.28 }) as f32
     }
-    /// MakeOS's share of the floating chrome: how far the glass frame has
-    /// taken over from the title fill, the sheet's roles from the ink — 1
-    /// settled, `makeos / (1 - tiling)` on the way in from a tiled desk so
-    /// the crossfade follows the chrome's own opacity, and 0 when there is
-    /// no glass material to paint the frame with.
+    /// The glass chrome's share of the floating chrome: how far the glass
+    /// frame has taken over from the title fill, the sheet's roles from the
+    /// ink — 1 settled, `glass_chrome / (1 - tiling)` on the way in from a
+    /// tiled desk so the crossfade follows the chrome's own opacity, and 0
+    /// when there is no glass material to paint the frame with.
     pub fn glass_share(&self, is_glass: bool) -> f64 {
         let floating = 1.0 - self.share(|s| s.tiling);
         if !is_glass || floating <= 0.001 {
             0.0
         } else {
-            self.share(|s| s.style == DesktopStyle::MakeOs) / floating
+            self.share(|s| s.glass_chrome) / floating
         }
     }
+    /// The child inset from the tile rect. A glass-chrome row's inset is the
+    /// room for its ring, so it counts only while there is a glass material
+    /// to draw one; without it the body sits flush, as it does under macOS.
+    pub fn frame_inset(&self, is_glass: bool) -> f64 {
+        self.mix(|s| row_frame_inset(s, is_glass))
+    }
+    /// [`frame_inset`](Self::frame_inset) of the destination row: the settled
+    /// child rect is allocated from it, like every layout target.
+    pub fn target_frame_inset(&self, is_glass: bool) -> f64 {
+        self.target_mix(|s| row_frame_inset(s, is_glass))
+    }
+}
+
+fn row_frame_inset(s: &StyleSpec, is_glass: bool) -> f64 {
+    if s.glass_chrome && !is_glass { 0.0 } else { s.frame_inset }
 }
 #[cfg(test)]
 mod tests {
@@ -341,6 +377,7 @@ mod tests {
         assert_eq!(SPECS.map(|s| s.menu_bottom_offset), [0.0, 98.0, 66.0, 34.0, 0.0, 0.0, 0.0, 98.0]);
         assert_eq!(SPECS.map(|s| s.dock_warp), [false, true, false, false, false, false, false, true]);
         assert_eq!(SPECS.map(|s| s.dark_chrome), [false, false, false, false, false, false, false, true]);
+        assert_eq!(SPECS.map(|s| s.glass_chrome), [false, false, false, false, false, false, false, true]);
         // The shadow reads the table: bit-neutral at the f32 the uniform takes
         // for the styles that had 0.28 / 0.16, MakeOS's own 0.44 above them.
         for (style, focused, unfocused) in [
@@ -421,33 +458,52 @@ mod tests {
         assert!((t.glass_share(true) - t.weights[DesktopStyle::MakeOs as usize]).abs() < 1e-12);
     }
     #[test]
+    fn a_glass_chrome_inset_needs_a_glass_material() {
+        // MakeOS's 2 px is the room for its ring: gone without a glass
+        // material. The other rows' insets do not read the material at all.
+        for (style, glass, flat) in [
+            (DesktopStyle::MakeOs, 2.0, 0.0),
+            (DesktopStyle::Macos, 0.0, 0.0),
+            (DesktopStyle::NextStep, 1.0, 1.0),
+        ] {
+            let mut t = StyleTween::default();
+            t.select(style);
+            t.step(1.0);
+            assert_eq!(t.frame_inset(true), glass, "{style:?} under glass");
+            assert_eq!(t.frame_inset(false), flat, "{style:?} flat");
+        }
+    }
+    #[test]
     fn from_and_target_reads_follow_the_tween() {
         // Only the NeXT dock stands along the screen edge.
         assert_eq!(SPECS.map(|s| s.shelf_vertical), [false, false, false, false, true, false, false, false]);
-        let mut t = StyleTween::default();
-        t.select(DesktopStyle::Macos);
-        t.step(1.0);
-        t.select(DesktopStyle::NextStep);
-        t.step(0.3);
+        let tween = |from: DesktopStyle, to: DesktopStyle| {
+            let mut t = StyleTween::default();
+            t.select(from);
+            t.step(1.0);
+            t.select(to);
+            t.step(0.3);
+            t
+        };
+        let t = tween(DesktopStyle::Macos, DesktopStyle::NextStep);
         // The destination row unblended; the tween's start blended.
-        let next = &SPECS[DesktopStyle::NextStep as usize];
-        assert_eq!(t.reserved_height(), next.reserved_height);
-        assert_eq!(t.target_mix(|s| s.frame_inset), next.frame_inset);
+        assert_eq!(t.reserved_height(), SPECS[DesktopStyle::NextStep as usize].reserved_height);
         assert_eq!(t.from_share(|s| s.caption_mac), 1.0);
         assert_eq!(t.from_mix(|s| s.rounding), SPECS[DesktopStyle::Macos as usize].rounding);
+        assert_eq!(t.target_frame_inset(true), SPECS[DesktopStyle::NextStep as usize].frame_inset);
         // A bottom shelf and the edge dock crossfade as two rects.
-        let layout = shelf_layout(rect(0.0, 0.0, 1400.0, 900.0), &t, 16);
+        let screen = rect(0.0, 0.0, 1400.0, 900.0);
+        let layout = shelf_layout(screen, &t, 16);
         assert!(layout.next.is_some());
         assert_eq!(layout.mix, t.share(|s| s.shelf_vertical));
-        assert!(layout.bar.size.x > 0.0 && layout.bar.size.y > 0.0);
         // MakeOS's bottom shelf is macOS-shaped on the way out too, never the
         // zero rect a five-style array would give the eighth row.
-        let mut m = StyleTween::default();
-        m.select(DesktopStyle::MakeOs);
-        m.step(1.0);
-        m.select(DesktopStyle::NextStep);
-        m.step(0.3);
-        assert_eq!(shelf_layout(rect(0.0, 0.0, 1400.0, 900.0), &m, 16).bar, layout.bar);
+        let bar = shelf_layout(screen, &tween(DesktopStyle::MakeOs, DesktopStyle::NextStep), 16).bar;
+        assert_eq!(bar, layout.bar);
+        assert!(bar.size.x > 0.0 && bar.size.y > 0.0);
+        let m = tween(DesktopStyle::Omarchy, DesktopStyle::MakeOs);
+        assert_eq!(m.target_frame_inset(true), 2.0);
+        assert_eq!(m.target_frame_inset(false), 0.0);
     }
 
     #[test]
@@ -1048,7 +1104,7 @@ pub fn dock_icon_bounds(state: &WmState, size: Vec2d, app: &str) -> Rect {
 /// a macOS<->MakeOS tween the two sum to one pill's worth of glass.
 pub fn shelf_glass_split(t: &StyleTween, glass_material: bool) -> (f64, f64) {
     let glass_shelf = t.share(|s| s.glass_shelf);
-    let makeos = if glass_material { t.share(|s| s.style == DesktopStyle::MakeOs) } else { 0.0 };
+    let makeos = if glass_material { t.share(|s| s.glass_chrome) } else { 0.0 };
     (glass_shelf - makeos, makeos)
 }
 
