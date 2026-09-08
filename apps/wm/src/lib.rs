@@ -2786,6 +2786,12 @@ impl App {
     }
 
     fn apply_background(&mut self, cx: &mut Cx, index: usize) {
+        // The slot is shared with MakeOS's bundled scene, and this is reached
+        // from a wallpaper fetch landing and from Super+Ctrl+Space whatever
+        // the style: only Omarchy's ground is a theme picture.
+        if self.state_mut().style.target != desktop::DesktopStyle::Omarchy {
+            return;
+        }
         let name = self.state_mut().theme_name.clone();
         let backgrounds = theme::theme_backgrounds(&name);
         if backgrounds.is_empty() {
@@ -4186,6 +4192,7 @@ impl MatchEvent for App {
         let sheet = desktop_style::StyleSheet::load(self.build.style);
         host::set_child_env("MAKEPAD_WIDGET_STYLE", std::ffi::OsStr::new(&sheet.name));
         self.module_host.apply_style(cx, &sheet);
+        let material = Self::material_from_sheet(&sheet);
         self.stylesheet = Some(sheet);
         let source = theme::load_theme_source(&theme_name);
         // The pool as this build wants it: nothing to keep warm without
@@ -4237,6 +4244,7 @@ impl MatchEvent for App {
             drop_hint: None,
             pane_sliding: false,
             style: Default::default(),
+            material,
             launchable: Launchable::default(),
             accessibility: desktop::Accessibility::load(&theme::makepad_home().join("wm/accessibility.splash")),
         });
