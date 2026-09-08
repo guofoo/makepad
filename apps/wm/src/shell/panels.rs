@@ -31,7 +31,7 @@ use super::ui::{contains, cut_top, inset, rect, DrawShellFill, Ico, ShellDraw};
 use super::wifi_linux::{
     KeyOutcome, RadioState, Security, StationState, WifiCommand, WifiHit, WifiPhase, WifiUi,
 };
-use super::{alpha, darker, CtrlState, ShellTokens};
+use super::{alpha, darker, CtrlState, MaterialTokens, ShellTokens};
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 #[path = "panels_linux.rs"]
 mod linux;
@@ -726,7 +726,19 @@ impl ShellPanel {
         );
     }
 
+    /// The material the kit paints this panel with; the next draw reads it.
+    pub fn set_material(&mut self, m: MaterialTokens) {
+        self.d.set_material(m);
+    }
+
+    /// Under glass the open panel is hoisted into the kit's overlay list.
     pub fn draw_surface(&mut self, cx: &mut Cx2d, screen: Rect) {
+        self.d.begin_surface(cx);
+        self.draw_surface_inner(cx, screen);
+        self.d.end_surface(cx);
+    }
+
+    fn draw_surface_inner(&mut self, cx: &mut Cx2d, screen: Rect) {
         self.screen = screen;
         let Some(kind) = self.open else {
             self.card = Rect::default();
