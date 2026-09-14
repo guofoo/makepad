@@ -1,6 +1,142 @@
 pub use makepad_widgets::desktop_style::DesktopStyle;
 use makepad_widgets::*;
 
+/// Everything one desktop style says about the shell's geometry and family
+/// behaviour, in one row. `StyleTween::mix` blends rows by the tween weights
+/// exactly as the literal arrays it replaces did. Numbers are logical px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StyleSpec {
+    pub style: DesktopStyle,
+    /// Tiling desk: Omarchy's ring and gaps; no floating chrome.
+    pub tiling: bool,
+    /// What the desk reserves at the bottom of the work area for the shelf;
+    /// a floating shelf (the macOS dock) reserves nothing.
+    pub reserved_height: f64,
+    pub title_height: f64,
+    /// Child inset from the tile rect: Omarchy's ring, or the retro bevel frame.
+    pub frame_inset: f64,
+    /// Window corner rounding through the captured window surface.
+    pub rounding: f64,
+    pub chrome_radius: f64,
+    pub frame_width: f64,
+    pub caption_width: f64,
+    /// Shelf (dock/taskbar) corner radius.
+    pub shelf_radius: f64,
+    /// Bottom resize bar height (NeXTSTEP).
+    pub resize_bar: f64,
+    /// Window shadow opacity when focused; 0 = no shadow. Read as a presence
+    /// flag until the frame draws from the material.
+    pub shadow: f64,
+    pub glass_shelf: bool,
+    /// The desk runs the backdrop compositor for this style.
+    pub composes: bool,
+    pub caption_mac: bool,
+    pub bevel_classic: bool,
+    pub bevel_next: bool,
+    /// Ground gradient (top, bottom), light appearance.
+    pub ground: ((u8, u8, u8), (u8, u8, u8)),
+    /// Ground gradient in the dark appearance; styles without a dark ground
+    /// repeat `ground`. `supports_dark()` decides which is read.
+    pub ground_dark: ((u8, u8, u8), (u8, u8, u8)),
+    /// Popup menu offset from the screen bottom (macOS 98, Windows 66, W2K 34);
+    /// 0 = the style's own placement.
+    pub menu_bottom_offset: f64,
+    /// The shelf stands along the screen edge (the NeXT dock) instead of
+    /// lying along the bottom, so a tween into or out of it crossfades two
+    /// shelves in place rather than morphing one rect.
+    pub shelf_vertical: bool,
+}
+
+/// One row per `DesktopStyle`, at the discriminant the tween weights index.
+/// A static rather than a const so `StyleTween::spec` can hand out a row.
+pub static SPECS: [StyleSpec; 7] = [
+    StyleSpec {
+        style: DesktopStyle::Omarchy,
+        tiling: true,
+        reserved_height: 0.0, title_height: 0.0,
+        frame_inset: crate::desk::BORDER_SIZE, rounding: 0.0, chrome_radius: 0.0,
+        frame_width: 2.0, caption_width: 30.0, shelf_radius: 0.0, resize_bar: 0.0, shadow: 0.0,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: false, bevel_next: false,
+        ground: ((16, 19, 21), (24, 30, 34)),
+        ground_dark: ((16, 19, 21), (24, 30, 34)),
+        menu_bottom_offset: 0.0,
+        shelf_vertical: false,
+    },
+    StyleSpec {
+        style: DesktopStyle::Macos,
+        tiling: false,
+        reserved_height: 0.0, title_height: 32.0,
+        frame_inset: 0.0, rounding: 14.0, chrome_radius: 10.0,
+        frame_width: 2.0, caption_width: 30.0, shelf_radius: 18.0, resize_bar: 0.0, shadow: 0.28,
+        glass_shelf: true, composes: true, caption_mac: true, bevel_classic: false, bevel_next: false,
+        ground: ((39, 43, 87), (171, 109, 131)),
+        ground_dark: ((12, 15, 36), (65, 36, 69)),
+        menu_bottom_offset: 98.0,
+        shelf_vertical: false,
+    },
+    StyleSpec {
+        style: DesktopStyle::Windows,
+        tiling: false,
+        reserved_height: 54.0, title_height: 34.0,
+        frame_inset: 0.0, rounding: 8.0, chrome_radius: 8.0,
+        frame_width: 2.0, caption_width: 46.0, shelf_radius: 0.0, resize_bar: 0.0, shadow: 0.28,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: false, bevel_next: false,
+        ground: ((10, 45, 108), (24, 137, 210)),
+        ground_dark: ((10, 19, 34), (21, 49, 72)),
+        menu_bottom_offset: 66.0,
+        shelf_vertical: false,
+    },
+    StyleSpec {
+        style: DesktopStyle::Windows2000,
+        tiling: false,
+        reserved_height: 34.0, title_height: 20.0,
+        frame_inset: 3.0, rounding: 0.0, chrome_radius: 0.0,
+        frame_width: 3.0, caption_width: 16.0, shelf_radius: 0.0, resize_bar: 0.0, shadow: 0.0,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: true, bevel_next: false,
+        ground: ((0, 128, 128), (0, 128, 128)),
+        ground_dark: ((0, 128, 128), (0, 128, 128)),
+        menu_bottom_offset: 34.0,
+        shelf_vertical: false,
+    },
+    StyleSpec {
+        style: DesktopStyle::NextStep,
+        tiling: false,
+        reserved_height: 0.0, title_height: 22.0,
+        frame_inset: 1.0, rounding: 0.0, chrome_radius: 0.0,
+        frame_width: 1.0, caption_width: 14.0, shelf_radius: 0.0, resize_bar: 8.0, shadow: 0.0,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: false, bevel_next: true,
+        ground: ((85, 85, 85), (85, 85, 85)),
+        ground_dark: ((85, 85, 85), (85, 85, 85)),
+        menu_bottom_offset: 0.0,
+        shelf_vertical: true,
+    },
+    // Phone modes draw no desktop chrome; every geometry number is 0.
+    StyleSpec {
+        style: DesktopStyle::Ios,
+        tiling: false,
+        reserved_height: 0.0, title_height: 0.0,
+        frame_inset: 0.0, rounding: 0.0, chrome_radius: 0.0,
+        frame_width: 0.0, caption_width: 0.0, shelf_radius: 0.0, resize_bar: 0.0, shadow: 0.0,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: false, bevel_next: false,
+        ground: ((38, 78, 137), (159, 207, 227)),
+        ground_dark: ((38, 78, 137), (159, 207, 227)),
+        menu_bottom_offset: 0.0,
+        shelf_vertical: false,
+    },
+    StyleSpec {
+        style: DesktopStyle::Android,
+        tiling: false,
+        reserved_height: 0.0, title_height: 0.0,
+        frame_inset: 0.0, rounding: 0.0, chrome_radius: 0.0,
+        frame_width: 0.0, caption_width: 0.0, shelf_radius: 0.0, resize_bar: 0.0, shadow: 0.0,
+        glass_shelf: false, composes: false, caption_mac: false, bevel_classic: false, bevel_next: false,
+        ground: ((50, 46, 73), (158, 156, 204)),
+        ground_dark: ((50, 46, 73), (158, 156, 204)),
+        menu_bottom_offset: 0.0,
+        shelf_vertical: false,
+    },
+];
+
 #[derive(Clone, Debug)]
 pub struct StyleTween {
     pub target: DesktopStyle,
@@ -38,19 +174,32 @@ impl StyleTween {
     pub fn active(&self) -> bool {
         self.elapsed < 1.0
     }
-    // Desktop-only geometry arrays have no contribution in phone modes.
-    pub fn value<const N: usize>(&self, values: [f64; N]) -> f64 {
-        self.weights.iter().zip(values).map(|(w, v)| w * v).sum()
+    /// Blend a spec field by the current weights (the literal arrays' sum).
+    pub fn mix(&self, f: impl Fn(&StyleSpec) -> f64) -> f64 {
+        self.weights.iter().zip(SPECS.iter()).map(|(w, s)| w * f(s)).sum()
+    }
+    /// The weight of the styles for which `f` holds (a family predicate as a
+    /// 0..1 mix), exact by construction: the terms are ×1.0 and +0.0.
+    pub fn share(&self, f: impl Fn(&StyleSpec) -> bool) -> f64 {
+        self.mix(|s| if f(s) { 1.0 } else { 0.0 })
+    }
+    /// The row the tween is heading to.
+    pub fn spec(&self) -> &'static StyleSpec {
+        &SPECS[self.target as usize]
     }
     /// Allocation and layout targets use the destination style. Interpolated
     /// values are only for presentation; feeding them back into app geometry
     /// recreates child framebuffers throughout the transition.
-    pub fn target_value<const N: usize>(&self, values: [f64; N]) -> f64 {
-        values.get(self.target as usize).copied().unwrap_or(0.0)
+    pub fn target_mix(&self, f: impl Fn(&StyleSpec) -> f64) -> f64 {
+        f(self.spec())
     }
-    /// The same mix taken at the tween's start.
-    pub fn from_value<const N: usize>(&self, values: [f64; N]) -> f64 {
-        self.from.iter().zip(values).map(|(w, v)| w * v).sum()
+    /// The same blend taken at the tween's start.
+    pub fn from_mix(&self, f: impl Fn(&StyleSpec) -> f64) -> f64 {
+        self.from.iter().zip(SPECS.iter()).map(|(w, s)| w * f(s)).sum()
+    }
+    /// [`share`](Self::share) at the tween's start.
+    pub fn from_share(&self, f: impl Fn(&StyleSpec) -> bool) -> f64 {
+        self.from_mix(|s| if f(s) { 1.0 } else { 0.0 })
     }
     /// The eased progress of the running tween, 1 once settled: the
     /// weights move from `from` to the target along this curve.
@@ -58,10 +207,10 @@ impl StyleTween {
         self.elapsed * self.elapsed * (3.0 - 2.0 * self.elapsed)
     }
     pub fn reserved_height(&self) -> f64 {
-        self.target_value([0.0, 0.0, 54.0, 34.0, 0.0])
+        self.target_mix(|s| s.reserved_height)
     }
     pub fn title_height(&self) -> f64 {
-        self.value([0.0, 32.0, 34.0, 20.0, 22.0])
+        self.mix(|s| s.title_height)
     }
 }
 #[cfg(test)]
@@ -78,6 +227,136 @@ mod tests {
         assert_eq!(t.weights, old);
         t.step(1.0);
         assert_eq!(t.weights, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+    }
+    #[test]
+    fn specs_reproduce_the_literal_arrays_for_every_style() {
+        // The arrays these replace, verbatim from the pre-refactor code, padded
+        // with the zeros the phone rows must hold for a tween into them to land.
+        let reserved = [0.0, 0.0, 54.0, 34.0, 0.0, 0.0, 0.0];
+        let title = [0.0, 32.0, 34.0, 20.0, 22.0, 0.0, 0.0];
+        let inset = [2.0, 0.0, 0.0, 3.0, 1.0, 0.0, 0.0]; // BORDER_SIZE = 2.0
+        let rounding = [0.0, 14.0, 8.0, 0.0, 0.0, 0.0, 0.0];
+        let chrome_radius = [0.0, 10.0, 8.0, 0.0, 0.0, 0.0, 0.0];
+        let frame_width = [2.0, 2.0, 2.0, 3.0, 1.0, 0.0, 0.0];
+        let caption_width = [30.0, 30.0, 46.0, 16.0, 14.0, 0.0, 0.0];
+        let shelf_radius = [0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        for (i, style) in DesktopStyle::ALL.iter().enumerate() {
+            let s = &SPECS[i];
+            assert_eq!(s.style, *style);
+            assert_eq!(s.reserved_height, reserved[i]);
+            assert_eq!(s.title_height, title[i]);
+            assert_eq!(s.frame_inset, inset[i]);
+            assert_eq!(s.rounding, rounding[i]);
+            assert_eq!(s.chrome_radius, chrome_radius[i]);
+            assert_eq!(s.frame_width, frame_width[i]);
+            assert_eq!(s.caption_width, caption_width[i]);
+            assert_eq!(s.shelf_radius, shelf_radius[i]);
+            assert_eq!(s.title_height, style.title_height(), "wm spec mirrors widgets");
+        }
+        // The table index is the enum discriminant, which is what the weights index.
+        assert_eq!(SPECS.len(), DesktopStyle::ALL.len());
+        assert!(SPECS.iter().enumerate().all(|(i, s)| s.style as usize == i));
+        // Family predicates the weights[i] sites encode.
+        assert!(SPECS[0].tiling && !SPECS[1].tiling);
+        assert!(SPECS[1].glass_shelf && SPECS[1].composes && SPECS[1].shadow > 0.0 && SPECS[1].caption_mac);
+        assert!(SPECS[2].shadow > 0.0 && !SPECS[2].glass_shelf);
+        assert!(SPECS[3].bevel_classic && SPECS[4].bevel_next && SPECS[4].resize_bar == 8.0);
+        // The rest of the row, from the match arms it centralises.
+        assert_eq!(SPECS.map(|s| s.menu_bottom_offset), [0.0, 98.0, 66.0, 34.0, 0.0, 0.0, 0.0]);
+        assert_eq!(SPECS.map(|s| s.ground), [
+            ((16, 19, 21), (24, 30, 34)),
+            ((39, 43, 87), (171, 109, 131)),
+            ((10, 45, 108), (24, 137, 210)),
+            ((0, 128, 128), (0, 128, 128)),
+            ((85, 85, 85), (85, 85, 85)),
+            ((38, 78, 137), (159, 207, 227)),
+            ((50, 46, 73), (158, 156, 204)),
+        ]);
+        assert_eq!(SPECS.map(|s| s.ground_dark), [
+            ((16, 19, 21), (24, 30, 34)),
+            ((12, 15, 36), (65, 36, 69)),
+            ((10, 19, 34), (21, 49, 72)),
+            ((0, 128, 128), (0, 128, 128)),
+            ((85, 85, 85), (85, 85, 85)),
+            ((38, 78, 137), (159, 207, 227)),
+            ((50, 46, 73), (158, 156, 204)),
+        ]);
+        // Blending is the same sum the arrays gave, mid-tween into a desktop
+        // style and into a phone one, bit-exact; the reserved height
+        // allocates layout, so it is the destination row's.
+        for target in [DesktopStyle::Windows, DesktopStyle::Ios] {
+            let mut t = StyleTween::default();
+            t.select(target);
+            t.step(0.3);
+            let w = t.weights;
+            assert_eq!(t.reserved_height(), reserved[target as usize]);
+            let expect: f64 = w.iter().zip(title).map(|(w, v)| w * v).sum();
+            assert_eq!(t.title_height(), expect);
+            let expect: f64 = w.iter().zip(rounding).map(|(w, v)| w * v).sum();
+            assert!((t.mix(|s| s.rounding) - expect).abs() < 1e-12);
+            assert_eq!(t.share(|s| s.tiling), w[0]);
+        }
+    }
+    #[test]
+    fn from_and_target_reads_follow_the_tween() {
+        // Only the NeXT dock stands along the screen edge.
+        assert_eq!(SPECS.map(|s| s.shelf_vertical), [false, false, false, false, true, false, false]);
+        let mut t = StyleTween::default();
+        t.select(DesktopStyle::Macos);
+        t.step(1.0);
+        t.select(DesktopStyle::NextStep);
+        t.step(0.3);
+        // The destination row unblended; the tween's start blended.
+        let next = &SPECS[DesktopStyle::NextStep as usize];
+        assert_eq!(t.reserved_height(), next.reserved_height);
+        assert_eq!(t.target_mix(|s| s.frame_inset), next.frame_inset);
+        assert_eq!(t.from_share(|s| s.caption_mac), 1.0);
+        assert_eq!(t.from_mix(|s| s.rounding), SPECS[DesktopStyle::Macos as usize].rounding);
+        // A bottom shelf and the edge dock crossfade as two rects.
+        let layout = shelf_layout(rect(0.0, 0.0, 1400.0, 900.0), &t, 16);
+        assert!(layout.next.is_some());
+        assert_eq!(layout.mix, t.share(|s| s.shelf_vertical));
+        assert!(layout.bar.size.x > 0.0 && layout.bar.size.y > 0.0);
+    }
+
+    #[test]
+    fn shelf_geometry_reads_the_table() {
+        // The shelf rect the five-wide literal arrays placed, verbatim, so the
+        // table keeps every shelf where it was: settled on each desktop style,
+        // and part way into one.
+        let screen = rect(0.0, 0.0, 1440.0, 900.0);
+        let n = 6;
+        let old = |t: &StyleTween| {
+            let dock_width = (((n + 1) as f64) * 62.0 + 20.0).min((screen.size.x - 24.0).max(1.0));
+            let next_height = ((n + 1) as f64 * 56.0).min((screen.size.y - 48.0).max(1.0));
+            let value = |v: [f64; 5]| -> f64 { t.weights.iter().zip(v).map(|(w, v)| w * v).sum() };
+            rect(
+                screen.pos.x + value([8.0, (screen.size.x - dock_width) * 0.5, 0.0, 0.0, screen.size.x - 64.0]),
+                screen.pos.y + value([0.0, screen.size.y - 88.0, screen.size.y - 54.0, screen.size.y - 34.0, 40.0]),
+                value([32.0, dock_width, screen.size.x, screen.size.x, 56.0]),
+                value([0.0, 78.0, 54.0, 34.0, next_height]),
+            )
+        };
+        let mut t = StyleTween::default();
+        for style in [
+            DesktopStyle::Omarchy,
+            DesktopStyle::Macos,
+            DesktopStyle::Windows,
+            DesktopStyle::Windows2000,
+            DesktopStyle::NextStep,
+        ] {
+            t.select(style);
+            t.step(1.0);
+            assert_eq!(shelf_geometry(screen, &t, n), old(&t), "{style:?}");
+        }
+        t.select(DesktopStyle::Macos);
+        t.step(0.3);
+        assert_eq!(shelf_geometry(screen, &t, n), old(&t), "mid-tween");
+        // Into a phone row the old five-wide zip stopped short of the weight
+        // that is growing; the seven-term mix multiplies it by the row's zeros.
+        t.select(DesktopStyle::Ios);
+        t.step(0.3);
+        assert_eq!(shelf_geometry(screen, &t, n), old(&t), "into a phone row");
     }
 }
 
@@ -463,18 +742,46 @@ pub fn app_icon(id: &str) -> Ico {
     }
 }
 /// The shelf rect for one mix of the per-style geometries.
-fn shelf_rect(screen: Rect, mix: impl Fn([f64; 5]) -> f64, app_count: usize) -> Rect {
+fn shelf_rect(screen: Rect, pick: impl Fn(&dyn Fn(&StyleSpec) -> f64) -> f64, app_count: usize) -> Rect {
     let dock_width = (((app_count + 1) as f64) * 62.0 + 20.0).min((screen.size.x - 24.0).max(1.0));
     let next_height = ((app_count + 1) as f64 * 56.0).min((screen.size.y - 48.0).max(1.0));
+    // Each shelf's placement depends on the screen, so it is a match per
+    // style rather than a table number; the phone rows have no shelf.
     rect(
-        screen.pos.x + mix([8.0, (screen.size.x - dock_width) * 0.5, 0.0, 0.0, screen.size.x - 64.0]),
-        screen.pos.y + mix([0.0, screen.size.y - 88.0, screen.size.y - 54.0, screen.size.y - 34.0, 40.0]),
-        mix([32.0, dock_width, screen.size.x, screen.size.x, 56.0]),
-        mix([0.0, 78.0, 54.0, 34.0, next_height]),
+        screen.pos.x + pick(&|s: &StyleSpec| match s.style {
+            DesktopStyle::Omarchy => 8.0,
+            DesktopStyle::Macos => (screen.size.x - dock_width) * 0.5,
+            DesktopStyle::Windows | DesktopStyle::Windows2000 => 0.0,
+            DesktopStyle::NextStep => screen.size.x - 64.0,
+            DesktopStyle::Ios | DesktopStyle::Android => 0.0,
+        }),
+        screen.pos.y + pick(&|s: &StyleSpec| match s.style {
+            DesktopStyle::Omarchy => 0.0,
+            DesktopStyle::Macos => screen.size.y - 88.0,
+            DesktopStyle::Windows => screen.size.y - 54.0,
+            DesktopStyle::Windows2000 => screen.size.y - 34.0,
+            DesktopStyle::NextStep => 40.0,
+            DesktopStyle::Ios | DesktopStyle::Android => 0.0,
+        }),
+        pick(&|s: &StyleSpec| match s.style {
+            DesktopStyle::Omarchy => 32.0,
+            DesktopStyle::Macos => dock_width,
+            DesktopStyle::Windows | DesktopStyle::Windows2000 => screen.size.x,
+            DesktopStyle::NextStep => 56.0,
+            DesktopStyle::Ios | DesktopStyle::Android => 0.0,
+        }),
+        pick(&|s: &StyleSpec| match s.style {
+            DesktopStyle::Omarchy => 0.0,
+            DesktopStyle::Macos => 78.0,
+            DesktopStyle::Windows => 54.0,
+            DesktopStyle::Windows2000 => 34.0,
+            DesktopStyle::NextStep => next_height,
+            DesktopStyle::Ios | DesktopStyle::Android => 0.0,
+        }),
     )
 }
 fn shelf_geometry(screen: Rect, style: &StyleTween, app_count: usize) -> Rect {
-    shelf_rect(screen, |values| style.value(values), app_count)
+    shelf_rect(screen, |f| style.mix(f), app_count)
 }
 
 /// Where the shelf paints this frame. The NeXT dock stands at the right
@@ -489,12 +796,12 @@ struct ShelfLayout {
     mix: f64,
 }
 fn shelf_layout(screen: Rect, style: &StyleTween, app_count: usize) -> ShelfLayout {
-    let to_next = style.target == DesktopStyle::NextStep;
-    let from_next = style.from_value([0.0, 0.0, 0.0, 0.0, 1.0]) > 0.5;
+    let to_next = style.spec().shelf_vertical;
+    let from_next = style.from_share(|s| s.shelf_vertical) > 0.5;
     if style.active() && to_next != from_next {
-        let from = shelf_rect(screen, |values| style.from_value(values), app_count);
-        let to = shelf_rect(screen, |values| style.target_value(values), app_count);
-        let mix = style.weights[4];
+        let from = shelf_rect(screen, |f| style.from_mix(f), app_count);
+        let to = shelf_rect(screen, |f| style.target_mix(f), app_count);
+        let mix = style.share(|s| s.shelf_vertical);
         if to_next {
             ShelfLayout { bar: from, next: Some(to), mix }
         } else {
@@ -569,7 +876,7 @@ impl Widget for DesktopShelf {
                 let tint_alpha = if dark { 0.32 } else { 0.20 };
                 script_apply_eval!(cx,self.glass,{draw_bg +: {tint_color: #(tint) tint_alpha: #(tint_alpha)}});
             }
-            let opacity = (1.0 - t.weights[0]) as f32;
+            let opacity = (1.0 - t.share(|s| s.tiling)) as f32;
             if opacity > 0.001 && !style.mobile() {
                 let mut apps: Vec<_> = crate::shell::launcher::apps(&state.launchable)
                     .into_iter()
@@ -604,22 +911,23 @@ impl Widget for DesktopShelf {
                 let layout = shelf_layout(screen, t, apps.len());
                 let r = layout.bar;
                 self.bounds = layout.next.map_or(r, |next| union_rect(r, next));
+                let glass_shelf = t.share(|s| s.glass_shelf);
                 // Window-backed Gaussian blur, sampled from the live desktop.
-                if t.weights[1] > 0.01 {
+                if glass_shelf > 0.01 {
                     if let Some(mut glass) = self.glass.borrow_mut::<gauss_view::GaussRoundedView>()
                     {
                         glass.draw_surface_with_backdrop(
                             cx,
                             r,
                             state.dock_backdrop.clone(),
-                            t.weights[1] as f32,
+                            glass_shelf as f32,
                         );
                     }
                 }
                 // Glass redirects drawing through its backdrop pass; keep its
                 // foreground in a separate list. Opaque shelves stay in the
                 // scene's recording so closing a child cannot detach them.
-                let glass_foreground = t.weights[1] > 0.001;
+                let glass_foreground = glass_shelf > 0.001;
                 if glass_foreground {
                     if self.overlay.is_none() {
                         self.overlay = Some(DrawList2d::new(cx));
@@ -637,9 +945,9 @@ impl Widget for DesktopShelf {
                     rgb(234, 238, 245)
                 };
                 let bar_share = if layout.next.is_some() { 1.0 - layout.mix } else { 1.0 };
-                self.chrome.color = alpha(color, (opacity as f64 * (1.0 - t.weights[1]) * bar_share) as f32);
-                self.chrome.radius = t.value([0.0, 18.0, 0.0, 0.0, 0.0]) as f32;
-                self.chrome.bevel = t.weights[3] as f32;
+                self.chrome.color = alpha(color, (opacity as f64 * (1.0 - glass_shelf) * bar_share) as f32);
+                self.chrome.radius = t.mix(|s| s.shelf_radius) as f32;
+                self.chrome.bevel = t.share(|s| s.bevel_classic) as f32;
                 self.chrome.draw_abs(cx, r);
                 if let Some(next) = layout.next {
                     self.chrome.color = alpha(color, (opacity as f64 * layout.mix) as f32);
@@ -659,7 +967,7 @@ impl Widget for DesktopShelf {
                     }
                     let hit_start = self.hits.len();
                     // Each shelf lays out in its own rect while two crossfade.
-                    let place = if style == DesktopStyle::NextStep { layout.next.unwrap_or(r) } else { r };
+                    let place = if SPECS[style as usize].shelf_vertical { layout.next.unwrap_or(r) } else { r };
                     let (x, y, w, h) = (place.pos.x, place.pos.y, place.size.x, place.size.y);
                     if style == DesktopStyle::NextStep {
                         let cell = h / n;
